@@ -68,6 +68,7 @@ function initCityState() {
     roadData: new Map(),
     roadFrontiers: [],
     maxRoadFrontiers: 12,
+    blockSize: 5,
     parkTiles: new Set(),
     nextBuildingId: 1,
     maxBuildings: 180,
@@ -169,9 +170,9 @@ function extendRoadNetwork(snapshot) {
     initializeRoadNetwork(snapshot);
   }
 
-  const roadCapacityTarget = 8 + cityState.buildings.length * 0.58;
+  const roadCapacityTarget = 8 + cityState.buildings.length * 0.44;
   const needsMoreAccess = cityState.roadTiles.size < roadCapacityTarget || pickNextBuildCell(snapshot) === null;
-  if (!needsMoreAccess && random() > snapshot.strength * 0.22) return;
+  if (!needsMoreAccess && random() > snapshot.strength * 0.14) return;
 
   const shouldBranch = snapshot.strength > 1.12 && cityState.roadTiles.size % 9 === 0;
   const steps = shouldBranch ? 2 : 1;
@@ -195,13 +196,14 @@ function initializeRoadNetwork(snapshot) {
   ];
 }
 
-function createRoadFrontier(x, y, dx, dy, kind) {
+function createRoadFrontier(x, y, dx, dy, kind, targetLength = null) {
   return {
     x,
     y,
     dx,
     dy,
     kind,
+    targetLength,
     age: 0,
     active: true,
   };
@@ -255,6 +257,9 @@ function advanceRoadFrontier(frontier, snapshot) {
   frontier.y = nextY;
   frontier.age += 1;
   maybeCreateRoadBranch(frontier, snapshot);
+  if (frontier.targetLength && frontier.age >= frontier.targetLength) {
+    frontier.active = false;
+  }
   return true;
 }
 
@@ -274,7 +279,7 @@ function maybeCreateRoadBranch(frontier, snapshot) {
   if (activeCount >= cityState.maxRoadFrontiers) return;
 
   const shouldCreateBranch =
-    (frontier.kind === 'main avenue' && frontier.age >= 4 && frontier.age % 5 === 0) ||
+    (frontier.kind === 'main avenue' && frontier.age >= cityState.blockSize && frontier.age % cityState.blockSize === 0) ||
     (snapshot.dominant === 'treble' && random() < 0.12);
   if (!shouldCreateBranch) return;
 
@@ -285,7 +290,14 @@ function maybeCreateRoadBranch(frontier, snapshot) {
 
   if (branchDirections.length === 0) return;
   const direction = random(branchDirections);
-  cityState.roadFrontiers.push(createRoadFrontier(frontier.x, frontier.y, direction.dx, direction.dy, 'side street'));
+  cityState.roadFrontiers.push(
+    createRoadFrontier(frontier.x, frontier.y, direction.dx, direction.dy, 'side street', getSideStreetTargetLength(snapshot))
+  );
+}
+
+function getSideStreetTargetLength(snapshot) {
+  const audioStretch = snapshot.dominant === 'bass' ? 1 : 0;
+  return floor(random(3, cityState.blockSize + 2 + audioStretch));
 }
 
 function createFallbackFrontier(snapshot) {
@@ -312,7 +324,7 @@ function createFallbackFrontier(snapshot) {
   if (candidates.length === 0) return null;
 
   const candidate = candidates[0];
-  const frontier = createRoadFrontier(candidate.x, candidate.y, candidate.dx, candidate.dy, 'side street');
+  const frontier = createRoadFrontier(candidate.x, candidate.y, candidate.dx, candidate.dy, 'side street', getSideStreetTargetLength(snapshot));
   cityState.roadFrontiers.push(frontier);
   return frontier;
 }
@@ -485,15 +497,25 @@ function isBuildableCell(x, y) {
   if (isRoadCell(x, y)) return false;
   if (isParkCell(x, y)) return false;
   if (isProtectedRoadGrowthCell(x, y)) return false;
+  if (isPlannedStreetCorridor(x, y)) return false;
   return true;
 }
 
 function isProtectedRoadGrowthCell(x, y) {
   for (const frontier of cityState.roadFrontiers) {
     if (!frontier.active) continue;
-    if (frontier.x + frontier.dx === x && frontier.y + frontier.dy === y) return true;
+    const reservedSteps = frontier.kind === 'main avenue' ? 3 : 1;
+    for (let step = 1; step <= reservedSteps; step++) {
+      if (frontier.x + frontier.dx * step === x && frontier.y + frontier.dy * step === y) return true;
+    }
   }
   return false;
+}
+
+function isPlannedStreetCorridor(x, y) {
+  const fromCenterX = abs(x - cityState.centerCell.x);
+  const fromCenterY = abs(y - cityState.centerCell.y);
+  return fromCenterX % cityState.blockSize === 0 || fromCenterY % cityState.blockSize === 0;
 }
 
 function countFootprintRoadEdges(x, y, width, depth) {
