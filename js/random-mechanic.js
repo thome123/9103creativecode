@@ -21,8 +21,10 @@ class RandomMechanic {
     window.randomHeightProvider = this;
   }
 
+  // The city rendering mechanic reads the generated heights and draws the buildings.
   draw() {}
 
+  // Keep building heights stable while the renderer adjusts to the new canvas size.
   windowResized() {}
 
   getHeight(row, column) {
