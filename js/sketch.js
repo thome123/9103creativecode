@@ -44,6 +44,7 @@ function draw() {
 
   drawCityBackground();
   drawRoadGrid();
+  drawGeneratedLots();
   drawParks();
   drawBuildings();
   inputMechanic.draw(cityState);
@@ -61,6 +62,9 @@ function initCityState() {
     originY: 112,
     buildings: [],
     occupied: new Set(),
+    roadTiles: new Set(),
+    roadData: new Map(),
+    parkTiles: new Set(),
     nextBuildingId: 1,
     maxBuildings: 82,
     selectedBuilding: null,
@@ -68,11 +72,7 @@ function initCityState() {
     audioSnapshot: null,
     timeOfDay: 0,
     timeLabel: 'Morning',
-    parks: [
-      { x: 1, y: 7, w: 2, h: 2 },
-      { x: 8, y: 1, w: 2, h: 2 },
-      { x: 10, y: 8, w: 2, h: 2 },
-    ],
+    centerCell: { x: 7, y: 6 },
   };
   updateCityLayout();
 }
@@ -88,6 +88,9 @@ function processAudioBuildingRequests() {
   const requests = audioMechanic.consumeBuildRequests();
   for (const snapshot of requests) {
     if (cityState.buildings.length >= cityState.maxBuildings) return;
+
+    extendRoadNetwork(snapshot);
+    maybeGenerateParkTile(snapshot);
 
     const cell = pickNextBuildCell();
     if (!cell) return;
@@ -154,40 +157,137 @@ function pickRoofColour(audioSnapshot, type) {
   return '#86cccc';
 }
 
-function pickNextBuildCell() {
-  const candidates = [];
-  const centerX = (cityState.gridColumns - 1) * 0.5;
-  const centerY = (cityState.gridRows - 1) * 0.5;
+function extendRoadNetwork(snapshot) {
+  const steps = snapshot.strength > 0.9 ? 3 : snapshot.strength > 0.45 ? 2 : 1;
 
-  for (let y = 0; y < cityState.gridRows; y++) {
-    for (let x = 0; x < cityState.gridColumns; x++) {
-      if (!isBuildableCell(x, y)) continue;
-      const distance = dist(x, y, centerX, centerY);
-      candidates.push({ x, y, score: distance + random(0, 3.2) });
+  for (let i = 0; i < steps; i++) {
+    const roadCell = pickNextRoadCell(snapshot);
+    if (!roadCell) return;
+    const key = cellKey(roadCell.x, roadCell.y);
+    cityState.roadTiles.add(key);
+    cityState.roadData.set(key, {
+      dominant: snapshot.dominant,
+      strength: snapshot.strength,
+      createdAtLabel: snapshot.timeLabel,
+    });
+  }
+}
+
+function pickNextRoadCell(snapshot) {
+  if (cityState.roadTiles.size === 0) {
+    return { ...cityState.centerCell };
+  }
+
+  const candidates = [];
+  for (const key of cityState.roadTiles) {
+    const roadCell = parseCellKey(key);
+    for (const neighbour of getNeighbourCells(roadCell.x, roadCell.y)) {
+      if (!isInBounds(neighbour.x, neighbour.y)) continue;
+      if (cityState.roadTiles.has(cellKey(neighbour.x, neighbour.y))) continue;
+      if (cityState.occupied.has(cellKey(neighbour.x, neighbour.y))) continue;
+      if (cityState.parkTiles.has(cellKey(neighbour.x, neighbour.y))) continue;
+
+      const centerDistance = dist(neighbour.x, neighbour.y, cityState.centerCell.x, cityState.centerCell.y);
+      const directionBias = getAudioDirectionBias(neighbour.x - roadCell.x, neighbour.y - roadCell.y, snapshot);
+      candidates.push({
+        ...neighbour,
+        score: centerDistance + directionBias + random(0, 1.1),
+      });
     }
   }
 
   candidates.sort((a, b) => a.score - b.score);
-  return candidates.length ? random(candidates.slice(0, min(8, candidates.length))) : null;
+  return candidates.length ? candidates[0] : null;
+}
+
+function getAudioDirectionBias(dx, dy, snapshot) {
+  if (snapshot.dominant === 'bass') {
+    return abs(dy) > 0 ? -0.55 : 0.65;
+  }
+  if (snapshot.dominant === 'mid') {
+    return abs(dx) > 0 ? -0.45 : 0.55;
+  }
+  if (snapshot.dominant === 'treble') {
+    return random(-0.35, 0.35);
+  }
+  return 0;
+}
+
+function maybeGenerateParkTile(snapshot) {
+  const chance = snapshot.dominant === 'treble' ? 0.24 : 0.08 + snapshot.strength * 0.06;
+  if (random() > chance) return;
+
+  const candidate = pickAdjacentLotToRoad();
+  if (!candidate) return;
+  cityState.parkTiles.add(cellKey(candidate.x, candidate.y));
+}
+
+function pickNextBuildCell() {
+  const candidates = [];
+
+  for (const key of cityState.roadTiles) {
+    const roadCell = parseCellKey(key);
+    for (const neighbour of getNeighbourCells(roadCell.x, roadCell.y)) {
+      if (!isBuildableCell(neighbour.x, neighbour.y)) continue;
+      const distance = dist(neighbour.x, neighbour.y, cityState.centerCell.x, cityState.centerCell.y);
+      candidates.push({ ...neighbour, score: distance + random(0, 1.8) });
+    }
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  return candidates.length ? random(candidates.slice(0, min(6, candidates.length))) : null;
+}
+
+function pickAdjacentLotToRoad() {
+  const candidates = [];
+  for (const key of cityState.roadTiles) {
+    const roadCell = parseCellKey(key);
+    for (const neighbour of getNeighbourCells(roadCell.x, roadCell.y)) {
+      if (!isBuildableCell(neighbour.x, neighbour.y)) continue;
+      const distance = dist(neighbour.x, neighbour.y, cityState.centerCell.x, cityState.centerCell.y);
+      candidates.push({ ...neighbour, score: distance + random(0, 2.4) });
+    }
+  }
+  candidates.sort((a, b) => a.score - b.score);
+  return candidates.length ? candidates[0] : null;
 }
 
 function isBuildableCell(x, y) {
+  if (!isInBounds(x, y)) return false;
   if (cityState.occupied.has(cellKey(x, y))) return false;
   if (isRoadCell(x, y)) return false;
   if (isParkCell(x, y)) return false;
   return true;
 }
 
+function getNeighbourCells(x, y) {
+  return [
+    { x: x + 1, y },
+    { x: x - 1, y },
+    { x, y: y + 1 },
+    { x, y: y - 1 },
+  ];
+}
+
+function isInBounds(x, y) {
+  return x >= 0 && x < cityState.gridColumns && y >= 0 && y < cityState.gridRows;
+}
+
 function cellKey(x, y) {
   return `${x},${y}`;
 }
 
+function parseCellKey(key) {
+  const [x, y] = key.split(',').map(Number);
+  return { x, y };
+}
+
 function isRoadCell(x, y) {
-  return x % 4 === 3 || y % 4 === 3;
+  return cityState.roadTiles.has(cellKey(x, y));
 }
 
 function isParkCell(x, y) {
-  return cityState.parks.some((park) => x >= park.x && x < park.x + park.w && y >= park.y && y < park.y + park.h);
+  return cityState.parkTiles.has(cellKey(x, y));
 }
 
 function isoToScreen(gridX, gridY, z = 0) {
@@ -208,11 +308,37 @@ function drawCityBackground() {
 }
 
 function drawRoadGrid() {
-  for (let y = 0; y < cityState.gridRows; y++) {
-    for (let x = 0; x < cityState.gridColumns; x++) {
-      const fillColour = isRoadCell(x, y) ? color(cityState.palette.road) : color(255, 255, 252, 210);
-      drawIsoTile({ x, y, fillColour, strokeColour: cityState.palette.line, strokeAlpha: isRoadCell(x, y) ? 90 : 44 });
-    }
+  for (const key of cityState.roadTiles) {
+    const road = parseCellKey(key);
+    const roadMeta = cityState.roadData.get(key);
+    drawIsoTile({
+      x: road.x,
+      y: road.y,
+      fillColour: getRoadColour(roadMeta),
+      strokeColour: cityState.palette.line,
+      strokeAlpha: 92,
+    });
+  }
+}
+
+function getRoadColour(roadMeta) {
+  const base = color(cityState.palette.road);
+  if (!roadMeta) return base;
+  if (roadMeta.dominant === 'bass') return lerpColor(base, color('#c8e1dc'), 0.38);
+  if (roadMeta.dominant === 'mid') return lerpColor(base, color('#d6f0ee'), 0.32);
+  if (roadMeta.dominant === 'treble') return lerpColor(base, color('#e8f6f2'), 0.42);
+  return base;
+}
+
+function drawGeneratedLots() {
+  for (const building of cityState.buildings) {
+    drawIsoTile({
+      x: building.gridX,
+      y: building.gridY,
+      fillColour: color(255, 255, 252, 218),
+      strokeColour: cityState.palette.line,
+      strokeAlpha: 48,
+    });
   }
 }
 
@@ -230,16 +356,13 @@ function drawIsoTile(tile) {
 }
 
 function drawParks() {
-  for (const park of cityState.parks) {
-    for (let y = park.y; y < park.y + park.h; y++) {
-      for (let x = park.x; x < park.x + park.w; x++) {
-        drawIsoTile({ x, y, fillColour: color(cityState.palette.park), strokeColour: cityState.palette.line, strokeAlpha: 64 });
-      }
-    }
+  for (const key of cityState.parkTiles) {
+    const park = parseCellKey(key);
+    drawIsoTile({ x: park.x, y: park.y, fillColour: color(cityState.palette.park), strokeColour: cityState.palette.line, strokeAlpha: 64 });
 
-    for (let i = 0; i < 12; i++) {
-      const gx = park.x + randomSeeded(i + park.x * 17 + park.y * 31, 0.15, park.w - 0.15);
-      const gy = park.y + randomSeeded(i + park.x * 11 + park.y * 23, 0.15, park.h - 0.15);
+    for (let i = 0; i < 5; i++) {
+      const gx = park.x + randomSeeded(i + park.x * 17 + park.y * 31, 0.15, 0.85);
+      const gy = park.y + randomSeeded(i + park.x * 11 + park.y * 23, 0.15, 0.85);
       drawTree(gx, gy);
     }
   }

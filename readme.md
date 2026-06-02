@@ -12,9 +12,9 @@ The reference image is used only as a visual style reference. The final city is 
 
 ## Techniques
 
-The prototype uses p5.js to draw an isometric city from grid coordinates. The main `sketch.js` file manages the shared city state, building array, grid layout, roads, parks, and rendering helpers such as `isoToScreen()`, `drawIsoTile()`, and `drawIsoBuilding()`.
+The prototype uses p5.js to draw an isometric city from grid coordinates. The main `sketch.js` file manages the shared city state, generated roads, building lots, parks, and rendering helpers such as `isoToScreen()`, `drawIsoTile()`, and `drawIsoBuilding()`.
 
-The audio mechanic uses `p5.sound`, `p5.FFT`, and `p5.Amplitude` to analyse an uploaded track. As music plays, audio energy creates building-generation requests. Each building stores the exact music time and frequency values that generated it.
+The audio mechanic uses the browser Web Audio API `AnalyserNode` to analyse an uploaded track. As music plays, audio energy expands the street network from the city centre and creates nearby building-generation requests. Each building stores the exact music time and frequency values that generated it.
 
 The time mechanic runs an automatic day cycle that changes the background colour and building tint while preserving the clear architectural map style.
 
@@ -33,14 +33,13 @@ ChatGPT/Codex was used to help plan the modular file structure, generate the ini
 ## External References
 
 - p5.js: https://p5js.org/
-- p5.sound: https://p5js.org/reference/#/libraries/p5.sound
-- p5.FFT reference: https://p5js.org/reference/#/p5.FFT
+- Web Audio API AnalyserNode: https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode
 
 ## Interaction Instructions
 
 1. Open `index.html` in a browser.
 2. Click `Choose Audio` and select a local music file.
 3. Click `Play`.
-4. Watch the city gradually generate buildings from the music.
+4. Watch streets and buildings grow outward from the centre of the map.
 5. Hover over generated buildings to highlight them.
 6. Click a building to view its generation archive, including timestamp, frequency values, height, type, and random seed.
