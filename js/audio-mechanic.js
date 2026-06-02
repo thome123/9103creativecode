@@ -10,7 +10,7 @@ class AudioMechanic {
     this.ready = false;
     this.requests = [];
     this.lastBuildFrame = 0;
-    this.minBuildFrames = 72;
+    this.minBuildFrames = 96;
     this.snapshot = this.emptySnapshot();
   }
 

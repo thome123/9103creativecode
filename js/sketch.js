@@ -71,7 +71,7 @@ function initCityState() {
     blockSize: 5,
     parkTiles: new Set(),
     nextBuildingId: 1,
-    maxBuildings: 180,
+    maxBuildings: 135,
     selectedBuilding: null,
     hoveredBuilding: null,
     audioSnapshot: null,
@@ -128,6 +128,9 @@ function createBuildingFromMechanics(cell, audioSnapshot, id) {
     stories,
     type,
     roofColour: pickRoofColour(audioSnapshot, type),
+    frontColour: pickFacadeColour(audioSnapshot, type, heightUnit, 'front'),
+    sideColour: pickFacadeColour(audioSnapshot, type, heightUnit, 'side'),
+    facadeStyle: pickFacadeStyle(audioSnapshot, type, cell),
     seed: floor(heightUnit * 1000000),
     createdAtSeconds: audioSnapshot.seconds,
     createdAtLabel: audioSnapshot.timeLabel,
@@ -163,6 +166,24 @@ function pickRoofColour(audioSnapshot, type) {
   if (type === 'civic block') return '#62b9bb';
   if (audioSnapshot.dominant === 'mid') return '#79c7c8';
   return '#86cccc';
+}
+
+function pickFacadeColour(audioSnapshot, type, heightUnit, face) {
+  const frontOptions = ['#fbfcf7', '#f6faf4', '#eef6f0', '#faf3ea'];
+  const sideOptions = ['#e7efea', '#dfe9e5', '#eaf0e8', '#eadfd4'];
+  const options = face === 'side' ? sideOptions : frontOptions;
+  const index = floor((heightUnit * 10 + audioSnapshot.seconds * 0.07) % options.length);
+
+  if (type === 'civic block') return face === 'side' ? '#d9e5e1' : '#f2f7f2';
+  if (type === 'light pavilion') return face === 'side' ? '#dceeea' : '#f7fbf7';
+  return options[index];
+}
+
+function pickFacadeStyle(audioSnapshot, type, cell) {
+  if (type === 'civic block') return 'banded';
+  if (audioSnapshot.dominant === 'treble') return 'fine-grid';
+  if ((cell.width || 1) + (cell.depth || 1) >= 4) return 'block';
+  return 'quiet';
 }
 
 function extendRoadNetwork(snapshot) {
@@ -389,10 +410,12 @@ function pickNextBuildCell(snapshot) {
         const distance = dist(centreX, centreY, cityState.centerCell.x, cityState.centerCell.y);
         const roadEdges = countFootprintRoadEdges(lot.x, lot.y, lot.width, lot.depth);
         const occupiedEdges = countFootprintOccupiedEdges(lot.x, lot.y, lot.width, lot.depth);
+        if (occupiedEdges > getNeighbourPressureLimit(snapshot)) continue;
+
         const area = lot.width * lot.depth;
         candidates.push({
           ...lot,
-          score: distance - roadEdges * 0.8 - area * 0.16 + occupiedEdges * 0.38 + random(0, 1.5),
+          score: distance - roadEdges * 0.8 - area * 0.14 + occupiedEdges * 0.72 + random(0, 1.5),
         });
       }
     }
@@ -400,6 +423,12 @@ function pickNextBuildCell(snapshot) {
 
   candidates.sort((a, b) => a.score - b.score);
   return candidates.length ? random(candidates.slice(0, min(6, candidates.length))) : null;
+}
+
+function getNeighbourPressureLimit(snapshot) {
+  if (snapshot.dominant === 'bass') return 3;
+  if (snapshot.dominant === 'treble') return 1;
+  return 2;
 }
 
 function getFootprintOptions(snapshot) {
@@ -715,21 +744,22 @@ function drawIsoBuilding(building) {
 
   stroke(lineColour);
   strokeWeight(lineWeight);
-  fill(timeMechanic.tintBuildingColour(cityState.palette.side, cityState, 0.92));
+  fill(timeMechanic.tintBuildingColour(building.sideColour || cityState.palette.side, cityState, 0.92));
   quad(b.x, b.y, c.x, c.y, c0.x, c0.y, b0.x, b0.y);
-  fill(timeMechanic.tintBuildingColour(cityState.palette.front, cityState, 1));
+  fill(timeMechanic.tintBuildingColour(building.frontColour || cityState.palette.front, cityState, 1));
   quad(c.x, c.y, d.x, d.y, d0.x, d0.y, c0.x, c0.y);
   fill(timeMechanic.tintBuildingColour(building.roofColour, cityState, 1.04));
   quad(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y);
 
-  drawWindows(building, b, c, c0, b0);
-  drawWindows(building, c, d, d0, c0);
+  drawWindows(building, b, c, c0, b0, 'side');
+  drawWindows(building, c, d, d0, c0, 'front');
   drawRoofDetails(building, a, b, c, d);
 }
 
-function drawWindows(building, topA, topB, bottomB, bottomA) {
+function drawWindows(building, topA, topB, bottomB, bottomA, face) {
   const floors = max(1, floor(building.stories));
-  stroke(35, 58, 56, 100);
+  const divisions = getFacadeDivisions(building, face);
+  stroke(35, 58, 56, building.facadeStyle === 'quiet' ? 72 : 104);
   strokeWeight(0.7);
   for (let i = 1; i <= floors; i++) {
     const t = i / (floors + 1);
@@ -739,11 +769,37 @@ function drawWindows(building, topA, topB, bottomB, bottomA) {
     const insetB = p5.Vector.lerp(left, right, 0.8);
     line(insetA.x, insetA.y, insetB.x, insetB.y);
   }
+
+  stroke(35, 58, 56, building.facadeStyle === 'fine-grid' ? 82 : 50);
+  strokeWeight(0.55);
+  for (let j = 1; j <= divisions; j++) {
+    const t = j / (divisions + 1);
+    const top = p5.Vector.lerp(topA, topB, t);
+    const bottom = p5.Vector.lerp(bottomA, bottomB, t);
+    const start = p5.Vector.lerp(top, bottom, 0.12);
+    const end = p5.Vector.lerp(top, bottom, 0.86);
+    line(start.x, start.y, end.x, end.y);
+  }
+}
+
+function getFacadeDivisions(building, face) {
+  if (building.facadeStyle === 'fine-grid') return face === 'front' ? 4 : 3;
+  if (building.facadeStyle === 'banded') return 3;
+  if (building.facadeStyle === 'block') return 2;
+  return 1;
 }
 
 function drawRoofDetails(building, a, b, c, d) {
   stroke(35, 58, 56, 120);
   strokeWeight(0.8);
+  noFill();
+  const centre = createVector((a.x + b.x + c.x + d.x) / 4, (a.y + b.y + c.y + d.y) / 4);
+  const ia = p5.Vector.lerp(a, centre, 0.14);
+  const ib = p5.Vector.lerp(b, centre, 0.14);
+  const ic = p5.Vector.lerp(c, centre, 0.14);
+  const id = p5.Vector.lerp(d, centre, 0.14);
+  quad(ia.x, ia.y, ib.x, ib.y, ic.x, ic.y, id.x, id.y);
+
   const p1 = p5.Vector.lerp(a, c, 0.35);
   const p2 = p5.Vector.lerp(a, c, 0.65);
   const q1 = p5.Vector.lerp(b, d, 0.35);
@@ -752,6 +808,26 @@ function drawRoofDetails(building, a, b, c, d) {
   if (building.type !== 'low-rise') {
     line(p2.x, p2.y, q2.x, q2.y);
   }
+
+  if (building.facadeStyle === 'banded' || building.facadeStyle === 'block') {
+    drawRooftopUnit(building, a, b, c, d);
+  }
+}
+
+function drawRooftopUnit(building, a, b, c, d) {
+  const left = p5.Vector.lerp(a, b, 0.56);
+  const right = p5.Vector.lerp(a, b, 0.76);
+  const back = p5.Vector.lerp(d, c, 0.76);
+  const front = p5.Vector.lerp(d, c, 0.56);
+  const u1 = p5.Vector.lerp(left, front, 0.36);
+  const u2 = p5.Vector.lerp(right, back, 0.36);
+  const u3 = p5.Vector.lerp(right, back, 0.58);
+  const u4 = p5.Vector.lerp(left, front, 0.58);
+
+  fill(timeMechanic.tintBuildingColour('#edf4ef', cityState, 0.98));
+  stroke(35, 58, 56, 105);
+  strokeWeight(0.65);
+  quad(u1.x, u1.y, u2.x, u2.y, u3.x, u3.y, u4.x, u4.y);
 }
 
 function mousePressed() {
