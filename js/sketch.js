@@ -69,9 +69,12 @@ function initCityState() {
     roadFrontiers: [],
     maxRoadFrontiers: 12,
     blockSize: 5,
+    generationPhase: 'roads',
+    plannedStreetTarget: 0,
+    developmentLots: [],
     parkTiles: new Set(),
     nextBuildingId: 1,
-    maxBuildings: 135,
+    maxBuildings: 105,
     selectedBuilding: null,
     hoveredBuilding: null,
     audioSnapshot: null,
@@ -81,6 +84,7 @@ function initCityState() {
     centerCell: { x: 14, y: 11 },
   };
   updateCityLayout();
+  cityState.plannedStreetTarget = countPlannedStreetCells();
 }
 
 function updateCityLayout() {
@@ -93,11 +97,14 @@ function updateCityLayout() {
 function processAudioBuildingRequests() {
   const requests = audioMechanic.consumeBuildRequests();
   for (const snapshot of requests) {
+    if (cityState.generationPhase === 'roads') {
+      generateStreetPlan(snapshot);
+      continue;
+    }
+
     if (cityState.buildings.length >= cityState.maxBuildings) return;
 
-    extendRoadNetwork(snapshot);
     maybeGenerateParkTile(snapshot);
-
     const cell = pickNextBuildCell(snapshot);
     if (!cell) return;
 
@@ -184,6 +191,125 @@ function pickFacadeStyle(audioSnapshot, type, cell) {
   if (audioSnapshot.dominant === 'treble') return 'fine-grid';
   if ((cell.width || 1) + (cell.depth || 1) >= 4) return 'block';
   return 'quiet';
+}
+
+function generateStreetPlan(snapshot) {
+  if (cityState.roadTiles.size === 0) {
+    addRoadTile(cityState.centerCell.x, cityState.centerCell.y, snapshot, 'central plaza');
+  }
+
+  const steps = getStreetPlanSteps(snapshot);
+  for (let i = 0; i < steps; i++) {
+    const roadCell = pickNextPlannedStreetCell(snapshot);
+    if (!roadCell) {
+      lockStreetPlan();
+      return;
+    }
+
+    addRoadTile(roadCell.x, roadCell.y, snapshot, roadCell.kind);
+  }
+
+  if (cityState.roadTiles.size >= cityState.plannedStreetTarget) {
+    lockStreetPlan();
+  }
+}
+
+function getStreetPlanSteps(snapshot) {
+  const bandPush = snapshot.dominant === 'bass' ? 2 : snapshot.dominant === 'mid' ? 1 : 0;
+  return floor(constrain(3 + snapshot.strength * 2 + bandPush, 3, 6));
+}
+
+function pickNextPlannedStreetCell(snapshot) {
+  const candidates = [];
+
+  for (let y = 0; y < cityState.gridRows; y++) {
+    for (let x = 0; x < cityState.gridColumns; x++) {
+      if (!isPlannedStreetCorridor(x, y)) continue;
+      if (isRoadCell(x, y)) continue;
+      if (!hasRoadNeighbour(x, y)) continue;
+
+      const distance = dist(x, y, cityState.centerCell.x, cityState.centerCell.y);
+      const verticalStreet = abs(x - cityState.centerCell.x) % cityState.blockSize === 0;
+      const horizontalStreet = abs(y - cityState.centerCell.y) % cityState.blockSize === 0;
+      candidates.push({
+        x,
+        y,
+        kind: getStreetKind(x, y),
+        score: distance + getAudioStreetBias(snapshot, verticalStreet, horizontalStreet) + random(0, 1.1),
+      });
+    }
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  return candidates[0] || null;
+}
+
+function getStreetKind(x, y) {
+  if (x === cityState.centerCell.x && y === cityState.centerCell.y) return 'central plaza';
+  if (x === cityState.centerCell.x || y === cityState.centerCell.y) return 'main avenue';
+  return 'block street';
+}
+
+function getAudioStreetBias(snapshot, verticalStreet, horizontalStreet) {
+  if (snapshot.dominant === 'bass') return verticalStreet ? -0.72 : 0.28;
+  if (snapshot.dominant === 'mid') return horizontalStreet ? -0.64 : 0.24;
+  if (snapshot.dominant === 'treble') return verticalStreet && horizontalStreet ? -0.28 : -0.12;
+  return 0;
+}
+
+function lockStreetPlan() {
+  cityState.generationPhase = 'buildings';
+  cityState.roadFrontiers.forEach((frontier) => {
+    frontier.active = false;
+  });
+  cityState.developmentLots = createDevelopmentLots();
+}
+
+function createDevelopmentLots() {
+  const lots = [];
+
+  for (let y = 0; y < cityState.gridRows; y++) {
+    for (let x = 0; x < cityState.gridColumns; x++) {
+      if (!isBuildableCell(x, y)) continue;
+
+      const roadCell = findNearestRoadCell(x, y, 3);
+      if (!roadCell) continue;
+
+      lots.push({
+        x,
+        y,
+        roadCell,
+        setback: roadCell.distance - 1,
+        blockKey: getUrbanBlockKey(x, y),
+      });
+    }
+  }
+
+  lots.sort((a, b) => {
+    const aDistance = dist(a.x, a.y, cityState.centerCell.x, cityState.centerCell.y);
+    const bDistance = dist(b.x, b.y, cityState.centerCell.x, cityState.centerCell.y);
+    return aDistance - bDistance;
+  });
+  return lots;
+}
+
+function findNearestRoadCell(x, y, maxDistance = Infinity) {
+  let closest = null;
+
+  for (const key of cityState.roadTiles) {
+    const road = parseCellKey(key);
+    const distance = abs(x - road.x) + abs(y - road.y);
+    if (distance > maxDistance) continue;
+    if (!closest || distance < closest.distance) {
+      closest = { x: road.x, y: road.y, distance };
+    }
+  }
+
+  return closest;
+}
+
+function hasRoadNeighbour(x, y) {
+  return getNeighbourCells(x, y).some((cell) => isRoadCell(cell.x, cell.y));
 }
 
 function extendRoadNetwork(snapshot) {
@@ -396,33 +522,47 @@ function maybeGenerateParkTile(snapshot) {
 function pickNextBuildCell(snapshot) {
   const candidates = [];
 
-  for (const key of cityState.roadTiles) {
-    const roadCell = parseCellKey(key);
-    for (const neighbour of getNeighbourCells(roadCell.x, roadCell.y)) {
-      if (!isBuildableCell(neighbour.x, neighbour.y)) continue;
+  for (const anchor of getCandidateDevelopmentAnchors()) {
+    if (!isBuildableCell(anchor.x, anchor.y)) continue;
+    const roadCell = anchor.roadCell || findNearestRoadCell(anchor.x, anchor.y, 3);
+    if (!roadCell) continue;
 
-      for (const footprint of getFootprintOptions(snapshot)) {
-        const lot = orientFootprintAwayFromRoad(neighbour, roadCell, footprint);
-        if (!lot || !isFootprintBuildable(lot.x, lot.y, lot.width, lot.depth)) continue;
+    for (const footprint of getFootprintOptions(snapshot)) {
+      const lot = orientFootprintAwayFromRoad(anchor, roadCell, footprint);
+      if (!lot || !isFootprintBuildable(lot.x, lot.y, lot.width, lot.depth)) continue;
 
-        const centreX = lot.x + lot.width * 0.5;
-        const centreY = lot.y + lot.depth * 0.5;
-        const distance = dist(centreX, centreY, cityState.centerCell.x, cityState.centerCell.y);
-        const roadEdges = countFootprintRoadEdges(lot.x, lot.y, lot.width, lot.depth);
-        const occupiedEdges = countFootprintOccupiedEdges(lot.x, lot.y, lot.width, lot.depth);
-        if (occupiedEdges > getNeighbourPressureLimit(snapshot)) continue;
+      const centreX = lot.x + lot.width * 0.5;
+      const centreY = lot.y + lot.depth * 0.5;
+      const distance = dist(centreX, centreY, cityState.centerCell.x, cityState.centerCell.y);
+      const roadEdges = countFootprintRoadEdges(lot.x, lot.y, lot.width, lot.depth);
+      const occupiedEdges = countFootprintOccupiedEdges(lot.x, lot.y, lot.width, lot.depth);
+      const blockLoad = countBuildingsInBlock(lot.x, lot.y);
+      if (occupiedEdges > getNeighbourPressureLimit(snapshot)) continue;
+      if (blockLoad >= getBlockBuildingLimit(snapshot)) continue;
 
-        const area = lot.width * lot.depth;
-        candidates.push({
-          ...lot,
-          score: distance - roadEdges * 0.8 - area * 0.14 + occupiedEdges * 0.72 + random(0, 1.5),
-        });
-      }
+      const area = lot.width * lot.depth;
+      candidates.push({
+        ...lot,
+        score: distance - roadEdges * 0.42 - area * 0.08 + occupiedEdges * 0.84 + blockLoad * 0.58 + getSetbackScore(anchor) + random(0, 1.7),
+      });
     }
   }
 
   candidates.sort((a, b) => a.score - b.score);
   return candidates.length ? random(candidates.slice(0, min(6, candidates.length))) : null;
+}
+
+function getCandidateDevelopmentAnchors() {
+  if (cityState.developmentLots.length > 0) {
+    return cityState.developmentLots;
+  }
+
+  const anchors = [];
+  for (const key of cityState.roadTiles) {
+    const roadCell = parseCellKey(key);
+    anchors.push(...getBuildAnchorsFromRoad(roadCell).map((anchor) => ({ ...anchor, roadCell })));
+  }
+  return anchors;
 }
 
 function getNeighbourPressureLimit(snapshot) {
@@ -431,12 +571,37 @@ function getNeighbourPressureLimit(snapshot) {
   return 2;
 }
 
+function getBlockBuildingLimit(snapshot) {
+  if (snapshot.dominant === 'bass') return 4;
+  if (snapshot.dominant === 'treble') return 2;
+  return 3;
+}
+
+function getBuildAnchorsFromRoad(roadCell) {
+  const anchors = [];
+
+  for (const direction of getCardinalDirections()) {
+    for (let setback = 0; setback <= 2; setback++) {
+      const x = roadCell.x + direction.dx * (setback + 1);
+      const y = roadCell.y + direction.dy * (setback + 1);
+      if (!isInBounds(x, y) || isRoadCell(x, y) || isPlannedStreetCorridor(x, y)) break;
+      anchors.push({ x, y, setback });
+    }
+  }
+
+  return anchors;
+}
+
+function getSetbackScore(anchor) {
+  if (anchor.setback === 0) return 0.45;
+  if (anchor.setback === 1) return -0.16;
+  return 0.08;
+}
+
 function getFootprintOptions(snapshot) {
   if (snapshot.dominant === 'bass') {
     return [
       { width: 2, depth: 2 },
-      { width: 3, depth: 1 },
-      { width: 1, depth: 3 },
       { width: 2, depth: 1 },
       { width: 1, depth: 2 },
       { width: 1, depth: 1 },
@@ -547,6 +712,16 @@ function isPlannedStreetCorridor(x, y) {
   return fromCenterX % cityState.blockSize === 0 || fromCenterY % cityState.blockSize === 0;
 }
 
+function countPlannedStreetCells() {
+  let total = 0;
+  for (let y = 0; y < cityState.gridRows; y++) {
+    for (let x = 0; x < cityState.gridColumns; x++) {
+      if (isPlannedStreetCorridor(x, y)) total += 1;
+    }
+  }
+  return total;
+}
+
 function countFootprintRoadEdges(x, y, width, depth) {
   let total = 0;
   for (const cell of getFootprintEdgeNeighbours(x, y, width, depth)) {
@@ -561,6 +736,17 @@ function countFootprintOccupiedEdges(x, y, width, depth) {
     if (cityState.occupied.has(cellKey(cell.x, cell.y))) total += 1;
   }
   return total;
+}
+
+function countBuildingsInBlock(x, y) {
+  const blockKey = getUrbanBlockKey(x, y);
+  return cityState.buildings.filter((building) => getUrbanBlockKey(building.gridX, building.gridY) === blockKey).length;
+}
+
+function getUrbanBlockKey(x, y) {
+  const column = floor((x - cityState.centerCell.x + cityState.gridColumns * cityState.blockSize) / cityState.blockSize);
+  const row = floor((y - cityState.centerCell.y + cityState.gridRows * cityState.blockSize) / cityState.blockSize);
+  return `${column},${row}`;
 }
 
 function getFootprintEdgeNeighbours(x, y, width, depth) {
@@ -580,11 +766,15 @@ function getFootprintEdgeNeighbours(x, y, width, depth) {
 }
 
 function getNeighbourCells(x, y) {
+  return getCardinalDirections().map((direction) => ({ x: x + direction.dx, y: y + direction.dy }));
+}
+
+function getCardinalDirections() {
   return [
-    { x: x + 1, y },
-    { x: x - 1, y },
-    { x, y: y + 1 },
-    { x, y: y - 1 },
+    { dx: 1, dy: 0 },
+    { dx: -1, dy: 0 },
+    { dx: 0, dy: 1 },
+    { dx: 0, dy: -1 },
   ];
 }
 

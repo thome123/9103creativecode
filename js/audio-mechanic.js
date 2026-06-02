@@ -10,7 +10,7 @@ class AudioMechanic {
     this.ready = false;
     this.requests = [];
     this.lastBuildFrame = 0;
-    this.minBuildFrames = 96;
+    this.minBuildFrames = 72;
     this.snapshot = this.emptySnapshot();
   }
 
@@ -148,7 +148,11 @@ class AudioMechanic {
   updateHud(cityState) {
     if (!this.stats) return;
     const label = cityState.timeLabel || 'Day';
-    this.stats.textContent = `Buildings: ${cityState.buildings.length}/${cityState.maxBuildings} | Time: ${label}`;
+    if (cityState.generationPhase === 'roads') {
+      this.stats.textContent = `Streets: ${cityState.roadTiles.size}/${cityState.plannedStreetTarget} | Time: ${label}`;
+      return;
+    }
+    this.stats.textContent = `Buildings: ${cityState.buildings.length}/${cityState.maxBuildings} | Blocks: ${cityState.developmentLots.length} | Time: ${label}`;
   }
 
   emptySnapshot() {
