@@ -34,6 +34,8 @@ function setup() {
   timeMechanic.setup(cityState);
   audioMechanic.setup(cityState);
   inputMechanic.setup(cityState);
+  window.cityState = cityState;
+  window.audioMechanic = audioMechanic;
 }
 
 function draw() {
@@ -54,8 +56,8 @@ function draw() {
 function initCityState() {
   cityState = {
     palette: CITY_PALETTE,
-    gridColumns: 14,
-    gridRows: 12,
+    gridColumns: 18,
+    gridRows: 14,
     tileW: 76,
     tileH: 38,
     originX: width * 0.5,
@@ -70,15 +72,16 @@ function initCityState() {
     selectedBuilding: null,
     hoveredBuilding: null,
     audioSnapshot: null,
+    growthStalls: 0,
     timeOfDay: 0,
     timeLabel: 'Morning',
-    centerCell: { x: 7, y: 6 },
+    centerCell: { x: 9, y: 7 },
   };
   updateCityLayout();
 }
 
 function updateCityLayout() {
-  cityState.tileW = constrain(width / 18, 52, 82);
+  cityState.tileW = constrain(width / 24, 34, 68);
   cityState.tileH = cityState.tileW * 0.5;
   cityState.originX = width * 0.5;
   cityState.originY = max(88, height * 0.08);
@@ -158,11 +161,15 @@ function pickRoofColour(audioSnapshot, type) {
 }
 
 function extendRoadNetwork(snapshot) {
-  const steps = snapshot.strength > 0.9 ? 3 : snapshot.strength > 0.45 ? 2 : 1;
+  const shouldBranch = snapshot.strength > 0.95 && cityState.roadTiles.size % 4 === 0;
+  const steps = shouldBranch ? 2 : 1;
 
   for (let i = 0; i < steps; i++) {
     const roadCell = pickNextRoadCell(snapshot);
-    if (!roadCell) return;
+    if (!roadCell) {
+      cityState.growthStalls += 1;
+      return;
+    }
     const key = cellKey(roadCell.x, roadCell.y);
     cityState.roadTiles.add(key);
     cityState.roadData.set(key, {
@@ -197,7 +204,43 @@ function pickNextRoadCell(snapshot) {
   }
 
   candidates.sort((a, b) => a.score - b.score);
+  return candidates.length ? candidates[0] : pickFallbackRoadCell(snapshot);
+}
+
+function pickFallbackRoadCell(snapshot) {
+  const candidates = [];
+
+  for (let y = 0; y < cityState.gridRows; y++) {
+    for (let x = 0; x < cityState.gridColumns; x++) {
+      const key = cellKey(x, y);
+      if (cityState.roadTiles.has(key)) continue;
+      if (cityState.occupied.has(key)) continue;
+      if (cityState.parkTiles.has(key)) continue;
+
+      const centerDistance = dist(x, y, cityState.centerCell.x, cityState.centerCell.y);
+      const roadDistance = getNearestRoadDistance(x, y);
+      const audioBias = snapshot.dominant === 'bass' ? abs(x - cityState.centerCell.x) * 0.08 : abs(y - cityState.centerCell.y) * 0.08;
+      candidates.push({
+        x,
+        y,
+        score: centerDistance + roadDistance * 0.35 + audioBias + random(0, 1.4),
+      });
+    }
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
   return candidates.length ? candidates[0] : null;
+}
+
+function getNearestRoadDistance(x, y) {
+  if (cityState.roadTiles.size === 0) return 0;
+
+  let bestDistance = Infinity;
+  for (const key of cityState.roadTiles) {
+    const road = parseCellKey(key);
+    bestDistance = min(bestDistance, dist(x, y, road.x, road.y));
+  }
+  return bestDistance;
 }
 
 function getAudioDirectionBias(dx, dy, snapshot) {
@@ -214,7 +257,7 @@ function getAudioDirectionBias(dx, dy, snapshot) {
 }
 
 function maybeGenerateParkTile(snapshot) {
-  const chance = snapshot.dominant === 'treble' ? 0.24 : 0.08 + snapshot.strength * 0.06;
+  const chance = snapshot.dominant === 'treble' ? 0.16 : 0.04 + snapshot.strength * 0.03;
   if (random() > chance) return;
 
   const candidate = pickAdjacentLotToRoad();
