@@ -56,8 +56,8 @@ function draw() {
 function initCityState() {
   cityState = {
     palette: CITY_PALETTE,
-    gridColumns: 18,
-    gridRows: 14,
+    gridColumns: 28,
+    gridRows: 22,
     tileW: 76,
     tileH: 38,
     originX: width * 0.5,
@@ -68,20 +68,20 @@ function initCityState() {
     roadData: new Map(),
     parkTiles: new Set(),
     nextBuildingId: 1,
-    maxBuildings: 82,
+    maxBuildings: 180,
     selectedBuilding: null,
     hoveredBuilding: null,
     audioSnapshot: null,
     growthStalls: 0,
     timeOfDay: 0,
     timeLabel: 'Morning',
-    centerCell: { x: 9, y: 7 },
+    centerCell: { x: 14, y: 11 },
   };
   updateCityLayout();
 }
 
 function updateCityLayout() {
-  cityState.tileW = constrain(width / 24, 34, 68);
+  cityState.tileW = constrain(width / 36, 22, 44);
   cityState.tileH = cityState.tileW * 0.5;
   cityState.originX = width * 0.5;
   cityState.originY = max(88, height * 0.08);
@@ -111,8 +111,8 @@ function createBuildingFromMechanics(cell, audioSnapshot, id) {
   }
 
   const heightUnit = getRandomHeightForCell(cell);
-  const height = map(heightUnit, 0, 1, 28, 148);
-  const stories = max(1, floor(height / 18));
+  const height = map(heightUnit, 0, 1, 16, 76);
+  const stories = max(1, floor(height / 12));
   const type = pickBuildingType(audioSnapshot, height);
 
   return {
@@ -147,9 +147,9 @@ function getRandomHeightForCell(cell) {
 }
 
 function pickBuildingType(audioSnapshot, height) {
-  if (audioSnapshot.dominant === 'bass' || height > 105) return 'civic block';
+  if (audioSnapshot.dominant === 'bass' || height > 58) return 'civic block';
   if (audioSnapshot.dominant === 'treble') return 'light pavilion';
-  if (height < 48) return 'low-rise';
+  if (height < 28) return 'low-rise';
   return 'mixed-use';
 }
 
@@ -161,7 +161,7 @@ function pickRoofColour(audioSnapshot, type) {
 }
 
 function extendRoadNetwork(snapshot) {
-  const shouldBranch = snapshot.strength > 0.95 && cityState.roadTiles.size % 4 === 0;
+  const shouldBranch = snapshot.strength > 1.05 && cityState.roadTiles.size % 7 === 0;
   const steps = shouldBranch ? 2 : 1;
 
   for (let i = 0; i < steps; i++) {

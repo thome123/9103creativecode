@@ -10,7 +10,7 @@ class AudioMechanic {
     this.ready = false;
     this.requests = [];
     this.lastBuildFrame = 0;
-    this.minBuildFrames = 34;
+    this.minBuildFrames = 72;
     this.snapshot = this.emptySnapshot();
   }
 
@@ -119,7 +119,7 @@ class AudioMechanic {
     cityState.audioSnapshot = this.snapshot;
 
     if (frameCount - this.lastBuildFrame >= this.minBuildFrames && cityState.buildings.length < cityState.maxBuildings) {
-      const chance = constrain(0.16 + strength * 0.62, 0.16, 0.9);
+      const chance = constrain(0.28 + strength * 0.48, 0.28, 0.82);
       if (random() < chance) {
         this.requests.push({ ...this.snapshot });
         this.lastBuildFrame = frameCount;
