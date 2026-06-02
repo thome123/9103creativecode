@@ -66,6 +66,8 @@ function initCityState() {
     occupied: new Set(),
     roadTiles: new Set(),
     roadData: new Map(),
+    roadFrontiers: [],
+    maxRoadFrontiers: 12,
     parkTiles: new Set(),
     nextBuildingId: 1,
     maxBuildings: 180,
@@ -95,13 +97,13 @@ function processAudioBuildingRequests() {
     extendRoadNetwork(snapshot);
     maybeGenerateParkTile(snapshot);
 
-    const cell = pickNextBuildCell();
+    const cell = pickNextBuildCell(snapshot);
     if (!cell) return;
 
     const building = createBuildingFromMechanics(cell, snapshot, cityState.nextBuildingId);
     cityState.nextBuildingId += 1;
     cityState.buildings.push(building);
-    cityState.occupied.add(cellKey(cell.x, cell.y));
+    markBuildingFootprint(building);
   }
 }
 
@@ -119,6 +121,8 @@ function createBuildingFromMechanics(cell, audioSnapshot, id) {
     id,
     gridX: cell.x,
     gridY: cell.y,
+    width: cell.width || 1,
+    depth: cell.depth || 1,
     height,
     stories,
     type,
@@ -161,99 +165,190 @@ function pickRoofColour(audioSnapshot, type) {
 }
 
 function extendRoadNetwork(snapshot) {
-  const shouldBranch = snapshot.strength > 1.05 && cityState.roadTiles.size % 7 === 0;
+  if (cityState.roadTiles.size === 0) {
+    initializeRoadNetwork(snapshot);
+  }
+
+  const roadCapacityTarget = 8 + cityState.buildings.length * 0.58;
+  const needsMoreAccess = cityState.roadTiles.size < roadCapacityTarget || pickNextBuildCell(snapshot) === null;
+  if (!needsMoreAccess && random() > snapshot.strength * 0.22) return;
+
+  const shouldBranch = snapshot.strength > 1.12 && cityState.roadTiles.size % 9 === 0;
   const steps = shouldBranch ? 2 : 1;
 
   for (let i = 0; i < steps; i++) {
-    const roadCell = pickNextRoadCell(snapshot);
-    if (!roadCell) {
+    const didGrow = advanceRoadNetwork(snapshot);
+    if (!didGrow) {
       cityState.growthStalls += 1;
       return;
     }
-    const key = cellKey(roadCell.x, roadCell.y);
-    cityState.roadTiles.add(key);
-    cityState.roadData.set(key, {
-      dominant: snapshot.dominant,
-      strength: snapshot.strength,
-      createdAtLabel: snapshot.timeLabel,
-    });
   }
 }
 
-function pickNextRoadCell(snapshot) {
-  if (cityState.roadTiles.size === 0) {
-    return { ...cityState.centerCell };
-  }
+function initializeRoadNetwork(snapshot) {
+  addRoadTile(cityState.centerCell.x, cityState.centerCell.y, snapshot, 'central plaza');
+  cityState.roadFrontiers = [
+    createRoadFrontier(cityState.centerCell.x, cityState.centerCell.y, 1, 0, 'main avenue'),
+    createRoadFrontier(cityState.centerCell.x, cityState.centerCell.y, -1, 0, 'main avenue'),
+    createRoadFrontier(cityState.centerCell.x, cityState.centerCell.y, 0, 1, 'main avenue'),
+    createRoadFrontier(cityState.centerCell.x, cityState.centerCell.y, 0, -1, 'main avenue'),
+  ];
+}
 
-  const candidates = [];
-  for (const key of cityState.roadTiles) {
-    const roadCell = parseCellKey(key);
-    for (const neighbour of getNeighbourCells(roadCell.x, roadCell.y)) {
-      if (!isInBounds(neighbour.x, neighbour.y)) continue;
-      if (cityState.roadTiles.has(cellKey(neighbour.x, neighbour.y))) continue;
-      if (cityState.occupied.has(cellKey(neighbour.x, neighbour.y))) continue;
-      if (cityState.parkTiles.has(cellKey(neighbour.x, neighbour.y))) continue;
+function createRoadFrontier(x, y, dx, dy, kind) {
+  return {
+    x,
+    y,
+    dx,
+    dy,
+    kind,
+    age: 0,
+    active: true,
+  };
+}
 
-      const centerDistance = dist(neighbour.x, neighbour.y, cityState.centerCell.x, cityState.centerCell.y);
-      const directionBias = getAudioDirectionBias(neighbour.x - roadCell.x, neighbour.y - roadCell.y, snapshot);
-      candidates.push({
-        ...neighbour,
-        score: centerDistance + directionBias + random(0, 1.1),
-      });
+function advanceRoadNetwork(snapshot) {
+  let attempts = 0;
+  while (attempts < 8) {
+    const frontier = pickRoadFrontier(snapshot) || createFallbackFrontier(snapshot);
+    if (!frontier) return false;
+
+    if (advanceRoadFrontier(frontier, snapshot)) {
+      return true;
     }
+    attempts += 1;
   }
-
-  candidates.sort((a, b) => a.score - b.score);
-  return candidates.length ? candidates[0] : pickFallbackRoadCell(snapshot);
+  return false;
 }
 
-function pickFallbackRoadCell(snapshot) {
+function pickRoadFrontier(snapshot) {
+  const activeFrontiers = cityState.roadFrontiers.filter((frontier) => frontier.active);
+  if (activeFrontiers.length === 0) return null;
+
+  const preferredFrontiers = activeFrontiers.filter((frontier) => {
+    if (snapshot.dominant === 'bass') return abs(frontier.dy) > 0;
+    if (snapshot.dominant === 'mid') return abs(frontier.dx) > 0;
+    if (snapshot.dominant === 'treble') return frontier.kind === 'side street';
+    return true;
+  });
+  const candidates = preferredFrontiers.length ? preferredFrontiers : activeFrontiers;
+
+  candidates.sort((a, b) => {
+    const aMainBias = a.kind === 'main avenue' ? -0.35 : 0;
+    const bMainBias = b.kind === 'main avenue' ? -0.35 : 0;
+    return a.age + aMainBias + random(0, 1.2) - (b.age + bMainBias + random(0, 1.2));
+  });
+  return candidates[0];
+}
+
+function advanceRoadFrontier(frontier, snapshot) {
+  const nextX = frontier.x + frontier.dx;
+  const nextY = frontier.y + frontier.dy;
+
+  if (!isAvailableRoadCell(nextX, nextY)) {
+    frontier.active = false;
+    return false;
+  }
+
+  addRoadTile(nextX, nextY, snapshot, frontier.kind);
+  frontier.x = nextX;
+  frontier.y = nextY;
+  frontier.age += 1;
+  maybeCreateRoadBranch(frontier, snapshot);
+  return true;
+}
+
+function addRoadTile(x, y, snapshot, kind) {
+  const key = cellKey(x, y);
+  cityState.roadTiles.add(key);
+  cityState.roadData.set(key, {
+    dominant: snapshot.dominant,
+    strength: snapshot.strength,
+    createdAtLabel: snapshot.timeLabel,
+    kind,
+  });
+}
+
+function maybeCreateRoadBranch(frontier, snapshot) {
+  const activeCount = cityState.roadFrontiers.filter((item) => item.active).length;
+  if (activeCount >= cityState.maxRoadFrontiers) return;
+
+  const shouldCreateBranch =
+    (frontier.kind === 'main avenue' && frontier.age >= 4 && frontier.age % 5 === 0) ||
+    (snapshot.dominant === 'treble' && random() < 0.12);
+  if (!shouldCreateBranch) return;
+
+  const branchDirections = [
+    { dx: frontier.dy, dy: -frontier.dx },
+    { dx: -frontier.dy, dy: frontier.dx },
+  ].filter((direction) => isAvailableRoadCell(frontier.x + direction.dx, frontier.y + direction.dy));
+
+  if (branchDirections.length === 0) return;
+  const direction = random(branchDirections);
+  cityState.roadFrontiers.push(createRoadFrontier(frontier.x, frontier.y, direction.dx, direction.dy, 'side street'));
+}
+
+function createFallbackFrontier(snapshot) {
   const candidates = [];
 
-  for (let y = 0; y < cityState.gridRows; y++) {
-    for (let x = 0; x < cityState.gridColumns; x++) {
-      const key = cellKey(x, y);
-      if (cityState.roadTiles.has(key)) continue;
-      if (cityState.occupied.has(key)) continue;
-      if (cityState.parkTiles.has(key)) continue;
-
-      const centerDistance = dist(x, y, cityState.centerCell.x, cityState.centerCell.y);
-      const roadDistance = getNearestRoadDistance(x, y);
-      const audioBias = snapshot.dominant === 'bass' ? abs(x - cityState.centerCell.x) * 0.08 : abs(y - cityState.centerCell.y) * 0.08;
-      candidates.push({
-        x,
-        y,
-        score: centerDistance + roadDistance * 0.35 + audioBias + random(0, 1.4),
-      });
-    }
-  }
-
-  candidates.sort((a, b) => a.score - b.score);
-  return candidates.length ? candidates[0] : null;
-}
-
-function getNearestRoadDistance(x, y) {
-  if (cityState.roadTiles.size === 0) return 0;
-
-  let bestDistance = Infinity;
   for (const key of cityState.roadTiles) {
     const road = parseCellKey(key);
-    bestDistance = min(bestDistance, dist(x, y, road.x, road.y));
+    for (const direction of getPreferredRoadDirections(snapshot)) {
+      const nextX = road.x + direction.dx;
+      const nextY = road.y + direction.dy;
+      if (!isAvailableRoadCell(nextX, nextY)) continue;
+
+      candidates.push({
+        x: road.x,
+        y: road.y,
+        dx: direction.dx,
+        dy: direction.dy,
+        score: dist(road.x, road.y, cityState.centerCell.x, cityState.centerCell.y) + random(0, 1.6),
+      });
+    }
   }
-  return bestDistance;
+
+  candidates.sort((a, b) => a.score - b.score);
+  if (candidates.length === 0) return null;
+
+  const candidate = candidates[0];
+  const frontier = createRoadFrontier(candidate.x, candidate.y, candidate.dx, candidate.dy, 'side street');
+  cityState.roadFrontiers.push(frontier);
+  return frontier;
 }
 
-function getAudioDirectionBias(dx, dy, snapshot) {
+function getPreferredRoadDirections(snapshot) {
   if (snapshot.dominant === 'bass') {
-    return abs(dy) > 0 ? -0.55 : 0.65;
+    return [
+      { dx: 0, dy: 1 },
+      { dx: 0, dy: -1 },
+      { dx: 1, dy: 0 },
+      { dx: -1, dy: 0 },
+    ];
   }
   if (snapshot.dominant === 'mid') {
-    return abs(dx) > 0 ? -0.45 : 0.55;
+    return [
+      { dx: 1, dy: 0 },
+      { dx: -1, dy: 0 },
+      { dx: 0, dy: 1 },
+      { dx: 0, dy: -1 },
+    ];
   }
-  if (snapshot.dominant === 'treble') {
-    return random(-0.35, 0.35);
-  }
-  return 0;
+  return shuffle([
+    { dx: 1, dy: 0 },
+    { dx: -1, dy: 0 },
+    { dx: 0, dy: 1 },
+    { dx: 0, dy: -1 },
+  ]);
+}
+
+function isAvailableRoadCell(x, y) {
+  if (!isInBounds(x, y)) return false;
+  const key = cellKey(x, y);
+  if (cityState.roadTiles.has(key)) return false;
+  if (cityState.occupied.has(key)) return false;
+  if (cityState.parkTiles.has(key)) return false;
+  return true;
 }
 
 function maybeGenerateParkTile(snapshot) {
@@ -265,20 +360,109 @@ function maybeGenerateParkTile(snapshot) {
   cityState.parkTiles.add(cellKey(candidate.x, candidate.y));
 }
 
-function pickNextBuildCell() {
+function pickNextBuildCell(snapshot) {
   const candidates = [];
 
   for (const key of cityState.roadTiles) {
     const roadCell = parseCellKey(key);
     for (const neighbour of getNeighbourCells(roadCell.x, roadCell.y)) {
       if (!isBuildableCell(neighbour.x, neighbour.y)) continue;
-      const distance = dist(neighbour.x, neighbour.y, cityState.centerCell.x, cityState.centerCell.y);
-      candidates.push({ ...neighbour, score: distance + random(0, 1.8) });
+
+      for (const footprint of getFootprintOptions(snapshot)) {
+        const lot = orientFootprintAwayFromRoad(neighbour, roadCell, footprint);
+        if (!lot || !isFootprintBuildable(lot.x, lot.y, lot.width, lot.depth)) continue;
+
+        const centreX = lot.x + lot.width * 0.5;
+        const centreY = lot.y + lot.depth * 0.5;
+        const distance = dist(centreX, centreY, cityState.centerCell.x, cityState.centerCell.y);
+        const roadEdges = countFootprintRoadEdges(lot.x, lot.y, lot.width, lot.depth);
+        const occupiedEdges = countFootprintOccupiedEdges(lot.x, lot.y, lot.width, lot.depth);
+        const area = lot.width * lot.depth;
+        candidates.push({
+          ...lot,
+          score: distance - roadEdges * 0.8 - area * 0.16 + occupiedEdges * 0.38 + random(0, 1.5),
+        });
+      }
     }
   }
 
   candidates.sort((a, b) => a.score - b.score);
   return candidates.length ? random(candidates.slice(0, min(6, candidates.length))) : null;
+}
+
+function getFootprintOptions(snapshot) {
+  if (snapshot.dominant === 'bass') {
+    return [
+      { width: 2, depth: 2 },
+      { width: 3, depth: 1 },
+      { width: 1, depth: 3 },
+      { width: 2, depth: 1 },
+      { width: 1, depth: 2 },
+      { width: 1, depth: 1 },
+    ];
+  }
+
+  if (snapshot.dominant === 'mid') {
+    return [
+      { width: 2, depth: 1 },
+      { width: 1, depth: 2 },
+      { width: 2, depth: 2 },
+      { width: 1, depth: 1 },
+    ];
+  }
+
+  return [
+    { width: 1, depth: 1 },
+    { width: 1, depth: 2 },
+    { width: 2, depth: 1 },
+  ];
+}
+
+function orientFootprintAwayFromRoad(neighbour, roadCell, footprint) {
+  const awayX = neighbour.x - roadCell.x;
+  const awayY = neighbour.y - roadCell.y;
+  let x = neighbour.x;
+  let y = neighbour.y;
+
+  if (awayX > 0) {
+    x = neighbour.x;
+    y = neighbour.y - floor((footprint.depth - 1) * 0.5);
+  } else if (awayX < 0) {
+    x = neighbour.x - footprint.width + 1;
+    y = neighbour.y - floor((footprint.depth - 1) * 0.5);
+  } else if (awayY > 0) {
+    x = neighbour.x - floor((footprint.width - 1) * 0.5);
+    y = neighbour.y;
+  } else if (awayY < 0) {
+    x = neighbour.x - floor((footprint.width - 1) * 0.5);
+    y = neighbour.y - footprint.depth + 1;
+  } else {
+    return null;
+  }
+
+  return {
+    x,
+    y,
+    width: footprint.width,
+    depth: footprint.depth,
+  };
+}
+
+function isFootprintBuildable(x, y, width, depth) {
+  for (let yy = y; yy < y + depth; yy++) {
+    for (let xx = x; xx < x + width; xx++) {
+      if (!isBuildableCell(xx, yy)) return false;
+    }
+  }
+  return true;
+}
+
+function markBuildingFootprint(building) {
+  for (let y = building.gridY; y < building.gridY + building.depth; y++) {
+    for (let x = building.gridX; x < building.gridX + building.width; x++) {
+      cityState.occupied.add(cellKey(x, y));
+    }
+  }
 }
 
 function pickAdjacentLotToRoad() {
@@ -300,7 +484,48 @@ function isBuildableCell(x, y) {
   if (cityState.occupied.has(cellKey(x, y))) return false;
   if (isRoadCell(x, y)) return false;
   if (isParkCell(x, y)) return false;
+  if (isProtectedRoadGrowthCell(x, y)) return false;
   return true;
+}
+
+function isProtectedRoadGrowthCell(x, y) {
+  for (const frontier of cityState.roadFrontiers) {
+    if (!frontier.active) continue;
+    if (frontier.x + frontier.dx === x && frontier.y + frontier.dy === y) return true;
+  }
+  return false;
+}
+
+function countFootprintRoadEdges(x, y, width, depth) {
+  let total = 0;
+  for (const cell of getFootprintEdgeNeighbours(x, y, width, depth)) {
+    if (isRoadCell(cell.x, cell.y)) total += 1;
+  }
+  return total;
+}
+
+function countFootprintOccupiedEdges(x, y, width, depth) {
+  let total = 0;
+  for (const cell of getFootprintEdgeNeighbours(x, y, width, depth)) {
+    if (cityState.occupied.has(cellKey(cell.x, cell.y))) total += 1;
+  }
+  return total;
+}
+
+function getFootprintEdgeNeighbours(x, y, width, depth) {
+  const neighbours = [];
+
+  for (let xx = x; xx < x + width; xx++) {
+    neighbours.push({ x: xx, y: y - 1 });
+    neighbours.push({ x: xx, y: y + depth });
+  }
+
+  for (let yy = y; yy < y + depth; yy++) {
+    neighbours.push({ x: x - 1, y: yy });
+    neighbours.push({ x: x + width, y: yy });
+  }
+
+  return neighbours.filter((cell) => isInBounds(cell.x, cell.y));
 }
 
 function getNeighbourCells(x, y) {
@@ -378,6 +603,8 @@ function drawGeneratedLots() {
     drawIsoTile({
       x: building.gridX,
       y: building.gridY,
+      width: building.width,
+      depth: building.depth,
       fillColour: color(255, 255, 252, 218),
       strokeColour: cityState.palette.line,
       strokeAlpha: 48,
@@ -387,9 +614,9 @@ function drawGeneratedLots() {
 
 function drawIsoTile(tile) {
   const a = isoToScreen(tile.x, tile.y);
-  const b = isoToScreen(tile.x + 1, tile.y);
-  const c = isoToScreen(tile.x + 1, tile.y + 1);
-  const d = isoToScreen(tile.x, tile.y + 1);
+  const b = isoToScreen(tile.x + (tile.width || 1), tile.y);
+  const c = isoToScreen(tile.x + (tile.width || 1), tile.y + (tile.depth || 1));
+  const d = isoToScreen(tile.x, tile.y + (tile.depth || 1));
 
   fill(tile.fillColour);
   strokeWeight(1);
@@ -430,7 +657,9 @@ function drawTree(gridX, gridY) {
 }
 
 function drawBuildings() {
-  const sortedBuildings = [...cityState.buildings].sort((a, b) => (a.gridX + a.gridY) - (b.gridX + b.gridY));
+  const sortedBuildings = [...cityState.buildings].sort(
+    (a, b) => (a.gridX + a.gridY + a.width + a.depth) - (b.gridX + b.gridY + b.width + b.depth)
+  );
   for (const building of sortedBuildings) {
     drawIsoBuilding(building);
   }
@@ -440,14 +669,16 @@ function drawIsoBuilding(building) {
   const h = building.height;
   const gx = building.gridX;
   const gy = building.gridY;
+  const bw = building.width || 1;
+  const bd = building.depth || 1;
   const a0 = isoToScreen(gx, gy, 0);
-  const b0 = isoToScreen(gx + 1, gy, 0);
-  const c0 = isoToScreen(gx + 1, gy + 1, 0);
-  const d0 = isoToScreen(gx, gy + 1, 0);
+  const b0 = isoToScreen(gx + bw, gy, 0);
+  const c0 = isoToScreen(gx + bw, gy + bd, 0);
+  const d0 = isoToScreen(gx, gy + bd, 0);
   const a = isoToScreen(gx, gy, h);
-  const b = isoToScreen(gx + 1, gy, h);
-  const c = isoToScreen(gx + 1, gy + 1, h);
-  const d = isoToScreen(gx, gy + 1, h);
+  const b = isoToScreen(gx + bw, gy, h);
+  const c = isoToScreen(gx + bw, gy + bd, h);
+  const d = isoToScreen(gx, gy + bd, h);
   const isHovered = cityState.hoveredBuilding && cityState.hoveredBuilding.id === building.id;
   const isSelected = cityState.selectedBuilding && cityState.selectedBuilding.id === building.id;
   const lineWeight = isHovered || isSelected ? 2.4 : 1.25;

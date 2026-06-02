@@ -55,6 +55,7 @@ class InputMechanic {
     this.infoPanel.innerHTML = `
       <h2>Building #${building.id}</h2>
       <p>${building.type} generated at ${building.createdAtLabel} from the uploaded track.</p>
+      <div class="data-row"><span>Footprint</span><strong>${building.width || 1} x ${building.depth || 1} lots</strong></div>
       <div class="data-row"><span>Height</span><strong>${building.height.toFixed(1)} px</strong></div>
       <div class="data-row"><span>Random seed</span><strong>${building.seed}</strong></div>
       <div class="data-row"><span>Dominant band</span><strong>${building.dominant}</strong></div>
