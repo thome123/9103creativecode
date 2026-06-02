@@ -43,6 +43,7 @@ class InputMechanic {
     }
     return null;
   }
+  
 
   renderInfo(building) {
     if (!this.infoPanel) return;
