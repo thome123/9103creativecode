@@ -17,9 +17,23 @@ class RandomMechanic {
         return constrain(randomHeight * 0.45 + noiseHeight * 0.55, 0, 1);
       }),
     );
+
+    window.randomHeightProvider = this;
   }
 
   draw() {}
 
   windowResized() {}
+
+  getHeight(row, column) {
+    if (row < 0 || row >= this.rows || column < 0 || column >= this.columns) {
+      return null;
+    }
+
+    return this.heightGrid[row][column];
+  }
+
+  getHeightGrid() {
+    return this.heightGrid.map((row) => [...row]);
+  }
 }
