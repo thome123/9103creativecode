@@ -1,34 +1,346 @@
-let mechanics = [];
+// Overall city structure generated with help from ChatGPT/Codex.
+// It coordinates the separate mechanic files required by the final brief.
+let cityState;
+let audioMechanic;
+let timeMechanic;
+let randomMechanic;
+let inputMechanic;
+
+const CITY_PALETTE = {
+  paper: '#f5f7f1',
+  road: '#dcefed',
+  line: '#233a38',
+  roof: '#79c7c8',
+  roofDark: '#54aeb0',
+  park: '#b9d9b4',
+  parkDark: '#6fa878',
+  front: '#f7faf5',
+  side: '#e4ece8',
+  shadow: '#9fb7b2',
+};
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
-  noStroke();
+  textFont('Georgia');
+  initCityState();
 
-  mechanics = [
-    new AudioMechanic(),
-    new TimeMechanic(),
-    new RandomMechanic(),
-    new InputMechanic(),
-  ];
+  randomMechanic = new RandomMechanic();
+  timeMechanic = new TimeMechanic();
+  audioMechanic = new AudioMechanic();
+  inputMechanic = new InputMechanic();
 
-  for (const mechanic of mechanics) {
-    mechanic.setup();
-  }
+  randomMechanic.setup(cityState);
+  timeMechanic.setup(cityState);
+  audioMechanic.setup(cityState);
+  inputMechanic.setup(cityState);
 }
 
 function draw() {
-  background(5, 7, 19);
+  timeMechanic.update(cityState);
+  audioMechanic.update(cityState);
+  processAudioBuildingRequests();
+  inputMechanic.update(cityState);
 
-  for (const mechanic of mechanics) {
-    mechanic.draw();
+  drawCityBackground();
+  drawRoadGrid();
+  drawParks();
+  drawBuildings();
+  inputMechanic.draw(cityState);
+  audioMechanic.updateHud(cityState);
+}
+
+function initCityState() {
+  cityState = {
+    palette: CITY_PALETTE,
+    gridColumns: 14,
+    gridRows: 12,
+    tileW: 76,
+    tileH: 38,
+    originX: width * 0.5,
+    originY: 112,
+    buildings: [],
+    occupied: new Set(),
+    nextBuildingId: 1,
+    maxBuildings: 82,
+    selectedBuilding: null,
+    hoveredBuilding: null,
+    audioSnapshot: null,
+    timeOfDay: 0,
+    timeLabel: 'Morning',
+    parks: [
+      { x: 1, y: 7, w: 2, h: 2 },
+      { x: 8, y: 1, w: 2, h: 2 },
+      { x: 10, y: 8, w: 2, h: 2 },
+    ],
+  };
+  updateCityLayout();
+}
+
+function updateCityLayout() {
+  cityState.tileW = constrain(width / 18, 52, 82);
+  cityState.tileH = cityState.tileW * 0.5;
+  cityState.originX = width * 0.5;
+  cityState.originY = max(88, height * 0.08);
+}
+
+function processAudioBuildingRequests() {
+  const requests = audioMechanic.consumeBuildRequests();
+  for (const snapshot of requests) {
+    if (cityState.buildings.length >= cityState.maxBuildings) return;
+
+    const cell = pickNextBuildCell();
+    if (!cell) return;
+
+    const building = createBuildingFromMechanics(cell, snapshot, cityState.nextBuildingId);
+    cityState.nextBuildingId += 1;
+    cityState.buildings.push(building);
+    cityState.occupied.add(cellKey(cell.x, cell.y));
   }
+}
+
+function createBuildingFromMechanics(cell, audioSnapshot, id) {
+  if (typeof randomMechanic.createBuilding === 'function') {
+    return randomMechanic.createBuilding(cell, audioSnapshot, id);
+  }
+
+  const heightUnit = getRandomHeightForCell(cell);
+  const height = map(heightUnit, 0, 1, 28, 148);
+  const stories = max(1, floor(height / 18));
+  const type = pickBuildingType(audioSnapshot, height);
+
+  return {
+    id,
+    gridX: cell.x,
+    gridY: cell.y,
+    height,
+    stories,
+    type,
+    roofColour: pickRoofColour(audioSnapshot, type),
+    seed: floor(heightUnit * 1000000),
+    createdAtSeconds: audioSnapshot.seconds,
+    createdAtLabel: audioSnapshot.timeLabel,
+    audioLevel: audioSnapshot.level,
+    bass: audioSnapshot.bass,
+    mid: audioSnapshot.mid,
+    treble: audioSnapshot.treble,
+    dominant: audioSnapshot.dominant,
+    bounds: null,
+  };
+}
+
+function getRandomHeightForCell(cell) {
+  if (typeof randomMechanic.getHeight === 'function') {
+    const row = cell.y % randomMechanic.rows;
+    const column = cell.x % randomMechanic.columns;
+    const storedHeight = randomMechanic.getHeight(row, column);
+    if (storedHeight !== null) return storedHeight;
+  }
+
+  return noise(cell.x * 0.22, cell.y * 0.22, cityState.nextBuildingId * 0.04);
+}
+
+function pickBuildingType(audioSnapshot, height) {
+  if (audioSnapshot.dominant === 'bass' || height > 105) return 'civic block';
+  if (audioSnapshot.dominant === 'treble') return 'light pavilion';
+  if (height < 48) return 'low-rise';
+  return 'mixed-use';
+}
+
+function pickRoofColour(audioSnapshot, type) {
+  if (type === 'light pavilion') return '#92d6d4';
+  if (type === 'civic block') return '#62b9bb';
+  if (audioSnapshot.dominant === 'mid') return '#79c7c8';
+  return '#86cccc';
+}
+
+function pickNextBuildCell() {
+  const candidates = [];
+  const centerX = (cityState.gridColumns - 1) * 0.5;
+  const centerY = (cityState.gridRows - 1) * 0.5;
+
+  for (let y = 0; y < cityState.gridRows; y++) {
+    for (let x = 0; x < cityState.gridColumns; x++) {
+      if (!isBuildableCell(x, y)) continue;
+      const distance = dist(x, y, centerX, centerY);
+      candidates.push({ x, y, score: distance + random(0, 3.2) });
+    }
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  return candidates.length ? random(candidates.slice(0, min(8, candidates.length))) : null;
+}
+
+function isBuildableCell(x, y) {
+  if (cityState.occupied.has(cellKey(x, y))) return false;
+  if (isRoadCell(x, y)) return false;
+  if (isParkCell(x, y)) return false;
+  return true;
+}
+
+function cellKey(x, y) {
+  return `${x},${y}`;
+}
+
+function isRoadCell(x, y) {
+  return x % 4 === 3 || y % 4 === 3;
+}
+
+function isParkCell(x, y) {
+  return cityState.parks.some((park) => x >= park.x && x < park.x + park.w && y >= park.y && y < park.y + park.h);
+}
+
+function isoToScreen(gridX, gridY, z = 0) {
+  return createVector(
+    cityState.originX + (gridX - gridY) * cityState.tileW * 0.5,
+    cityState.originY + (gridX + gridY) * cityState.tileH * 0.5 - z
+  );
+}
+
+function drawCityBackground() {
+  const topColour = timeMechanic.getSkyColour(cityState, 0);
+  const bottomColour = timeMechanic.getSkyColour(cityState, 1);
+  for (let y = 0; y < height; y++) {
+    const t = y / max(1, height - 1);
+    stroke(lerpColor(topColour, bottomColour, t));
+    line(0, y, width, y);
+  }
+}
+
+function drawRoadGrid() {
+  for (let y = 0; y < cityState.gridRows; y++) {
+    for (let x = 0; x < cityState.gridColumns; x++) {
+      const fillColour = isRoadCell(x, y) ? color(cityState.palette.road) : color(255, 255, 252, 210);
+      drawIsoTile({ x, y, fillColour, strokeColour: cityState.palette.line, strokeAlpha: isRoadCell(x, y) ? 90 : 44 });
+    }
+  }
+}
+
+function drawIsoTile(tile) {
+  const a = isoToScreen(tile.x, tile.y);
+  const b = isoToScreen(tile.x + 1, tile.y);
+  const c = isoToScreen(tile.x + 1, tile.y + 1);
+  const d = isoToScreen(tile.x, tile.y + 1);
+
+  fill(tile.fillColour);
+  strokeWeight(1);
+  const strokeC = color(tile.strokeColour || cityState.palette.line);
+  stroke(red(strokeC), green(strokeC), blue(strokeC), tile.strokeAlpha ?? 90);
+  quad(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y);
+}
+
+function drawParks() {
+  for (const park of cityState.parks) {
+    for (let y = park.y; y < park.y + park.h; y++) {
+      for (let x = park.x; x < park.x + park.w; x++) {
+        drawIsoTile({ x, y, fillColour: color(cityState.palette.park), strokeColour: cityState.palette.line, strokeAlpha: 64 });
+      }
+    }
+
+    for (let i = 0; i < 12; i++) {
+      const gx = park.x + randomSeeded(i + park.x * 17 + park.y * 31, 0.15, park.w - 0.15);
+      const gy = park.y + randomSeeded(i + park.x * 11 + park.y * 23, 0.15, park.h - 0.15);
+      drawTree(gx, gy);
+    }
+  }
+}
+
+function randomSeeded(seed, minValue, maxValue) {
+  const value = fract(sin(seed * 12.9898) * 43758.5453);
+  return lerp(minValue, maxValue, value);
+}
+
+function fract(value) {
+  return value - floor(value);
+}
+
+function drawTree(gridX, gridY) {
+  const base = isoToScreen(gridX, gridY, 0);
+  stroke(cityState.palette.line);
+  strokeWeight(0.8);
+  fill(cityState.palette.parkDark);
+  ellipse(base.x, base.y - 7, 9, 17);
+  line(base.x, base.y - 1, base.x, base.y + 5);
+}
+
+function drawBuildings() {
+  const sortedBuildings = [...cityState.buildings].sort((a, b) => (a.gridX + a.gridY) - (b.gridX + b.gridY));
+  for (const building of sortedBuildings) {
+    drawIsoBuilding(building);
+  }
+}
+
+function drawIsoBuilding(building) {
+  const h = building.height;
+  const gx = building.gridX;
+  const gy = building.gridY;
+  const a0 = isoToScreen(gx, gy, 0);
+  const b0 = isoToScreen(gx + 1, gy, 0);
+  const c0 = isoToScreen(gx + 1, gy + 1, 0);
+  const d0 = isoToScreen(gx, gy + 1, 0);
+  const a = isoToScreen(gx, gy, h);
+  const b = isoToScreen(gx + 1, gy, h);
+  const c = isoToScreen(gx + 1, gy + 1, h);
+  const d = isoToScreen(gx, gy + 1, h);
+  const isHovered = cityState.hoveredBuilding && cityState.hoveredBuilding.id === building.id;
+  const isSelected = cityState.selectedBuilding && cityState.selectedBuilding.id === building.id;
+  const lineWeight = isHovered || isSelected ? 2.4 : 1.25;
+  const lineColour = isHovered || isSelected ? color('#178f92') : color(cityState.palette.line);
+
+  building.bounds = {
+    minX: min(a.x, b.x, c.x, d.x, a0.x, b0.x, c0.x, d0.x),
+    maxX: max(a.x, b.x, c.x, d.x, a0.x, b0.x, c0.x, d0.x),
+    minY: min(a.y, b.y, c.y, d.y, a0.y, b0.y, c0.y, d0.y),
+    maxY: max(a.y, b.y, c.y, d.y, a0.y, b0.y, c0.y, d0.y),
+  };
+
+  stroke(lineColour);
+  strokeWeight(lineWeight);
+  fill(timeMechanic.tintBuildingColour(cityState.palette.side, cityState, 0.92));
+  quad(b.x, b.y, c.x, c.y, c0.x, c0.y, b0.x, b0.y);
+  fill(timeMechanic.tintBuildingColour(cityState.palette.front, cityState, 1));
+  quad(c.x, c.y, d.x, d.y, d0.x, d0.y, c0.x, c0.y);
+  fill(timeMechanic.tintBuildingColour(building.roofColour, cityState, 1.04));
+  quad(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y);
+
+  drawWindows(building, b, c, c0, b0);
+  drawWindows(building, c, d, d0, c0);
+  drawRoofDetails(building, a, b, c, d);
+}
+
+function drawWindows(building, topA, topB, bottomB, bottomA) {
+  const floors = max(1, floor(building.stories));
+  stroke(35, 58, 56, 100);
+  strokeWeight(0.7);
+  for (let i = 1; i <= floors; i++) {
+    const t = i / (floors + 1);
+    const left = p5.Vector.lerp(topA, bottomA, t);
+    const right = p5.Vector.lerp(topB, bottomB, t);
+    const insetA = p5.Vector.lerp(left, right, 0.2);
+    const insetB = p5.Vector.lerp(left, right, 0.8);
+    line(insetA.x, insetA.y, insetB.x, insetB.y);
+  }
+}
+
+function drawRoofDetails(building, a, b, c, d) {
+  stroke(35, 58, 56, 120);
+  strokeWeight(0.8);
+  const p1 = p5.Vector.lerp(a, c, 0.35);
+  const p2 = p5.Vector.lerp(a, c, 0.65);
+  const q1 = p5.Vector.lerp(b, d, 0.35);
+  const q2 = p5.Vector.lerp(b, d, 0.65);
+  line(p1.x, p1.y, q1.x, q1.y);
+  if (building.type !== 'low-rise') {
+    line(p2.x, p2.y, q2.x, q2.y);
+  }
+}
+
+function mousePressed() {
+  inputMechanic.mousePressed(cityState);
 }
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-
-  for (const mechanic of mechanics) {
-    mechanic.windowResized();
-  }
+  updateCityLayout();
+  inputMechanic.windowResized(cityState);
 }

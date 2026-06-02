@@ -3,16 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Creative Coding Mechanics Workspace</title>
+    <title>Audio-Generated Isometric City</title>
     <link rel="stylesheet" href="style.css" />
     <script src="https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/p5.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/addons/p5.sound.min.js"></script>
   </head>
   <body>
     <main class="hud">
-      <h1>Creative Coding Mechanics Workspace</h1>
-      <p>A modular p5.js workspace with one main sketch and four separate mechanic files.</p>
+      <h1>Audio-Generated Isometric City</h1>
+      <p>Upload a track and press play. The music gradually draws a clean architectural 2.5D city.</p>
+      <div class="controls">
+        <button id="chooseAudio" type="button">Choose Audio</button>
+        <button id="playPause" type="button" disabled>Play</button>
+      </div>
+      <p id="audioStatus">No audio loaded.</p>
+      <p id="cityStats">Buildings: 0</p>
     </main>
+
+    <aside id="buildingInfo" class="building-info" aria-live="polite">
+      <h2>Building Archive</h2>
+      <p>Click a generated building to inspect its audio data.</p>
+    </aside>
+
+    <input id="audioInput" type="file" accept="audio/*" hidden />
     <script src="js/audio-mechanic.js"></script>
     <script src="js/time-mechanic.js"></script>
     <script src="js/random-mechanic.js"></script>
