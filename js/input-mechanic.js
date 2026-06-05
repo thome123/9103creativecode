@@ -5,6 +5,7 @@ class InputMechanic {
     this.infoPanel = document.getElementById('buildingInfo');
     this.hoverPadding = 5;
     this.defaultCursor = ARROW;
+    this.ensureValueStyles();
 
     this.escapeHandler = (event) => {
       if (event.key !== 'Escape') return;
@@ -13,6 +14,21 @@ class InputMechanic {
     };
 
     window.addEventListener('keydown', this.escapeHandler);
+  }
+
+  ensureValueStyles() {
+    if (document.getElementById('building-value-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'building-value-styles';
+    style.textContent = `
+      .building-info .data-row strong {
+        font-family: "Segoe UI", Arial, sans-serif;
+        font-variant-numeric: lining-nums tabular-nums;
+        font-feature-settings: "lnum" 1, "tnum" 1;
+      }
+    `;
+    document.head.appendChild(style);
   }
 
   update(cityState) {
