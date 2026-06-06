@@ -43,3 +43,4 @@ ChatGPT/Codex was used to help plan the modular file structure, generate the ini
 4. Watch streets and buildings grow outward from the centre of the map.
 5. Hover over generated buildings to highlight them.
 6. Click a building to view its generation archive, including timestamp, frequency values, height, type, and random seed.
+7. Choose another audio file to clear the current map and start a new city.

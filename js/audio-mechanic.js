@@ -12,9 +12,10 @@ class AudioMechanic {
     this.lastBuildFrame = 0;
     this.minBuildFrames = 72;
     this.snapshot = this.emptySnapshot();
+    this.resetCity = null;
   }
 
-  setup(cityState) {
+  setup(cityState, resetCity) {
     this.status = document.getElementById('audioStatus');
     this.stats = document.getElementById('cityStats');
     this.chooseAudio = document.getElementById('chooseAudio');
@@ -22,6 +23,7 @@ class AudioMechanic {
     this.audioInput = document.getElementById('audioInput');
     this.audioElement = document.getElementById('audioPlayer');
     this.AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    this.resetCity = resetCity;
 
     if (!this.audioElement || !this.AudioContextClass) {
       this.status.textContent = 'This browser does not support the required audio analyser.';
@@ -47,6 +49,11 @@ class AudioMechanic {
     }
 
     this.audioElement.pause();
+    this.resetGenerationState();
+    if (typeof this.resetCity === 'function') {
+      this.resetCity();
+    }
+
     this.audioElement.src = URL.createObjectURL(file);
     this.audioElement.load();
     this.ready = true;
@@ -72,6 +79,12 @@ class AudioMechanic {
       this.playPause.textContent = 'Play';
       this.status.textContent = 'Audio paused.';
     }
+  }
+
+  resetGenerationState() {
+    this.requests.length = 0;
+    this.lastBuildFrame = 0;
+    this.snapshot = this.emptySnapshot();
   }
 
   async ensureAudioContext() {

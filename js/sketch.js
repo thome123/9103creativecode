@@ -32,7 +32,7 @@ function setup() {
 
   randomMechanic.setup(cityState);
   timeMechanic.setup(cityState);
-  audioMechanic.setup(cityState);
+  audioMechanic.setup(cityState, resetCityForNewAudio);
   inputMechanic.setup(cityState);
   window.cityState = cityState;
   window.audioMechanic = audioMechanic;
@@ -54,7 +54,30 @@ function draw() {
 }
 
 function initCityState() {
-  cityState = {
+  cityState = createDefaultCityState();
+  updateCityLayout();
+  cityState.plannedStreetTarget = countPlannedStreetCells();
+}
+
+function resetCityForNewAudio() {
+  Object.assign(cityState, createDefaultCityState());
+  updateCityLayout();
+  cityState.plannedStreetTarget = countPlannedStreetCells();
+
+  if (randomMechanic) {
+    randomMechanic.setup(cityState);
+  }
+
+  if (inputMechanic) {
+    inputMechanic.windowResized(cityState);
+    inputMechanic.renderInfo(null);
+  }
+
+  window.cityState = cityState;
+}
+
+function createDefaultCityState() {
+  return {
     palette: CITY_PALETTE,
     gridColumns: 28,
     gridRows: 22,
@@ -83,8 +106,6 @@ function initCityState() {
     timeLabel: 'Morning',
     centerCell: { x: 14, y: 11 },
   };
-  updateCityLayout();
-  cityState.plannedStreetTarget = countPlannedStreetCells();
 }
 
 function updateCityLayout() {
