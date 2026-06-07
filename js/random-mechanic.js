@@ -11,6 +11,7 @@ class RandomMechanic {
     this.streetKinds = new Map();
   }
 
+  // Prepare random height and street data, then expose providers for the shared sketch.
   setup(cityState) {
     this.generateHeightGrid();
     this.generateStreetBlueprint(cityState);
@@ -19,6 +20,7 @@ class RandomMechanic {
     window.randomStreetProvider = this;
   }
 
+  // Blend random values with noise to create normalized building height data.
   generateHeightGrid() {
     const noiseOffset = Math.random() * 1000;
 
@@ -32,6 +34,7 @@ class RandomMechanic {
     );
   }
 
+  // Build a random street blueprint that is revealed gradually during playback.
   generateStreetBlueprint(cityState) {
     this.streetCells.clear();
     this.streetOrder = [];
@@ -83,6 +86,7 @@ class RandomMechanic {
     return offsets;
   }
 
+  // Add short side streets so the road network varies from run to run.
   addRandomSpurs(cityState, count) {
     const directions = [
       { x: 1, y: 0 },
@@ -178,6 +182,7 @@ class RandomMechanic {
     window.isPlannedStreetCorridor = (x, y) => this.hasStreetCell(x, y);
   }
 
+  // Convert each audio request into the next batch of planned road tiles.
   generateStreetPlan(cityState, snapshot) {
     if (cityState.roadTiles.size >= this.streetTarget || this.streetCursor >= this.streetOrder.length) {
       this.lockStreetPlan(cityState);
@@ -224,6 +229,7 @@ class RandomMechanic {
     cityState.developmentLots = this.createDevelopmentLots(cityState);
   }
 
+  // Find buildable lots near the generated streets for later building placement.
   createDevelopmentLots(cityState) {
     const lots = [];
 
