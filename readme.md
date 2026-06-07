@@ -23,8 +23,8 @@ The time mechanic runs an automatic day cycle that changes the background colour
 - Overall structure: Zhang Wang
 - Audio mechanic: Zhang Wang
 - Time mechanic: Zhang Wang
-- Randomness mechanic: teammate file placeholder in `js/random-mechanic.js`
-- User input mechanic: teammate file placeholder in `js/input-mechanic.js`
+- Randomness mechanic: Shuaiyu Zhou
+- User input mechanic: Shaojie Dai
 
 ## AI Acknowledgement
 
