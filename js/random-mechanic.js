@@ -16,6 +16,7 @@ class RandomMechanic {
     this.generateStreetBlueprint(cityState);
     this.installStreetHooks(cityState);
     window.randomHeightProvider = this;
+    window.randomStreetProvider = this;
   }
 
   generateHeightGrid() {
@@ -159,6 +160,11 @@ class RandomMechanic {
     return this.streetCells.has(`${x},${y}`);
   }
 
+  getStreetPlan() {
+    return this.streetOrder.map((street) => ({ ...street }));
+  }
+
+  // Keep the sketch API unchanged while routing street planning through this mechanic.
   installStreetHooks(cityState) {
     if (!cityState) return;
 
