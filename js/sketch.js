@@ -952,6 +952,12 @@ function drawIsoBuilding(building) {
     minY: min(a.y, b.y, c.y, d.y, a0.y, b0.y, c0.y, d0.y),
     maxY: max(a.y, b.y, c.y, d.y, a0.y, b0.y, c0.y, d0.y),
   };
+  // This code was generated with the help of ChatGPT and stores visible isometric faces for precise hit testing.
+  building.hitPolygons = {
+    roof: [a, b, c, d],
+    side: [b, c, c0, b0],
+    front: [c, d, d0, c0],
+  };
 
   stroke(lineColour);
   strokeWeight(lineWeight);

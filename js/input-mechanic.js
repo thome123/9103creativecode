@@ -71,20 +71,63 @@ class InputMechanic {
     for (let i = cityState.buildings.length - 1; i >= 0; i--) {
       const building = cityState.buildings[i];
       if (!building.bounds) continue;
-      if (
-        mouseX >= building.bounds.minX &&
-        mouseX <= building.bounds.maxX &&
-        mouseY >= building.bounds.minY &&
-        mouseY <= building.bounds.maxY
-      ) {
+      if (!this.isPointInsideBounds(mouseX, mouseY, building.bounds)) continue;
+      if (!building.hitPolygons || this.isPointInsideBuildingFaces(mouseX, mouseY, building.hitPolygons)) {
         return building;
       }
     }
     return null;
   }
 
+  isPointInsideBounds(x, y, bounds) {
+    return x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY;
+  }
+
+  isPointInsideBuildingFaces(x, y, hitPolygons) {
+    // This code was generated with the help of ChatGPT and checks whether the pointer is inside an isometric building face.
+    return Object.values(hitPolygons).some((polygon) => this.isPointInsidePolygon(x, y, polygon));
+  }
+
+  isPointInsidePolygon(x, y, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const current = polygon[i];
+      const previous = polygon[j];
+      if (this.isPointOnSegment(x, y, previous, current)) return true;
+
+      const crossesY = current.y > y !== previous.y > y;
+      if (!crossesY) continue;
+
+      const intersectionX = ((previous.x - current.x) * (y - current.y)) / (previous.y - current.y) + current.x;
+      if (x < intersectionX) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  isPointOnSegment(x, y, start, end) {
+    const tolerance = 0.5;
+    const length = dist(start.x, start.y, end.x, end.y);
+    if (length === 0) return dist(x, y, start.x, start.y) <= tolerance;
+
+    const cross = (x - start.x) * (end.y - start.y) - (y - start.y) * (end.x - start.x);
+    if (abs(cross) / length > tolerance) return false;
+
+    return (
+      x >= min(start.x, end.x) - tolerance &&
+      x <= max(start.x, end.x) + tolerance &&
+      y >= min(start.y, end.y) - tolerance &&
+      y <= max(start.y, end.y) + tolerance
+    );
+  }
+
   drawBuildingFrame(building, options) {
     if (!building || !building.bounds) return;
+    if (building.hitPolygons) {
+      this.drawBuildingFaceFrames(building.hitPolygons, options);
+      return;
+    }
 
     const bounds = building.bounds;
     const x1 = bounds.minX - options.padding;
@@ -114,6 +157,26 @@ class InputMechanic {
     line(x1, y2, x1, y2 - length);
     line(x2, y2, x2 - length, y2);
     line(x2, y2, x2, y2 - length);
+    pop();
+  }
+
+  drawBuildingFaceFrames(hitPolygons, options) {
+    // This code was generated with the help of ChatGPT and draws highlight outlines around the building's visible isometric faces.
+    const frameColour = color(options.colour);
+
+    push();
+    noFill();
+    stroke(red(frameColour), green(frameColour), blue(frameColour), options.alpha);
+    strokeWeight(options.weight);
+
+    for (const polygon of Object.values(hitPolygons)) {
+      beginShape();
+      for (const point of polygon) {
+        vertex(point.x, point.y);
+      }
+      endShape(CLOSE);
+    }
+
     pop();
   }
 
