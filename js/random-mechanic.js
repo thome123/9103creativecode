@@ -14,6 +14,7 @@ class RandomMechanic {
   setup(cityState) {
     this.generateHeightGrid();
     this.generateStreetBlueprint(cityState);
+    this.installStreetHooks(cityState);
     window.randomHeightProvider = this;
   }
 
@@ -156,6 +157,121 @@ class RandomMechanic {
 
   hasStreetCell(x, y) {
     return this.streetCells.has(`${x},${y}`);
+  }
+
+  installStreetHooks(cityState) {
+    if (!cityState) return;
+
+    cityState.plannedStreetTarget = this.countPlannedStreetCells();
+
+    window.generateStreetPlan = (snapshot) => {
+      this.generateStreetPlan(cityState, snapshot);
+    };
+
+    window.countPlannedStreetCells = () => this.countPlannedStreetCells();
+    window.isPlannedStreetCorridor = (x, y) => this.hasStreetCell(x, y);
+  }
+
+  generateStreetPlan(cityState, snapshot) {
+    if (cityState.roadTiles.size >= this.streetTarget || this.streetCursor >= this.streetOrder.length) {
+      this.lockStreetPlan(cityState);
+      return;
+    }
+
+    const steps = this.getStreetPlanSteps(snapshot);
+
+    for (let i = 0; i < steps && this.streetCursor < this.streetOrder.length; i++) {
+      const street = this.streetOrder[this.streetCursor];
+      this.streetCursor += 1;
+      this.addRoadTile(cityState, street, snapshot);
+    }
+
+    if (this.streetCursor >= this.streetOrder.length) {
+      this.lockStreetPlan(cityState);
+    }
+  }
+
+  getStreetPlanSteps(snapshot) {
+    const strength = snapshot ? snapshot.strength : 0;
+    const bandPush = snapshot && snapshot.dominant === 'bass' ? 2 : snapshot && snapshot.dominant === 'mid' ? 1 : 0;
+    return floor(constrain(3 + strength * 2 + bandPush, 3, 7));
+  }
+
+  addRoadTile(cityState, street, snapshot) {
+    const key = `${street.x},${street.y}`;
+    if (cityState.roadTiles.has(key)) return;
+
+    cityState.roadTiles.add(key);
+    cityState.roadData.set(key, {
+      dominant: snapshot ? snapshot.dominant : 'none',
+      strength: snapshot ? snapshot.strength : 0,
+      createdAtLabel: snapshot ? snapshot.timeLabel : '00:00',
+      kind: street.kind,
+    });
+  }
+
+  lockStreetPlan(cityState) {
+    cityState.generationPhase = 'buildings';
+    cityState.roadFrontiers.forEach((frontier) => {
+      frontier.active = false;
+    });
+    cityState.developmentLots = this.createDevelopmentLots(cityState);
+  }
+
+  createDevelopmentLots(cityState) {
+    const lots = [];
+
+    for (let y = 0; y < cityState.gridRows; y++) {
+      for (let x = 0; x < cityState.gridColumns; x++) {
+        if (this.hasStreetCell(x, y)) continue;
+        if (cityState.occupied.has(`${x},${y}`)) continue;
+        if (cityState.parkTiles.has(`${x},${y}`)) continue;
+
+        const roadCell = this.findNearestRoadCell(cityState, x, y, 3);
+        if (!roadCell) continue;
+
+        lots.push({
+          x,
+          y,
+          roadCell,
+          setback: roadCell.distance - 1,
+          blockKey: this.getUrbanBlockKey(cityState, x, y),
+        });
+      }
+    }
+
+    lots.sort((a, b) => {
+      const aDistance = abs(a.x - cityState.centerCell.x) + abs(a.y - cityState.centerCell.y);
+      const bDistance = abs(b.x - cityState.centerCell.x) + abs(b.y - cityState.centerCell.y);
+      return aDistance - bDistance;
+    });
+
+    return lots;
+  }
+
+  findNearestRoadCell(cityState, x, y, maxDistance) {
+    let closest = null;
+
+    for (const key of cityState.roadTiles) {
+      const [roadX, roadY] = key.split(',').map(Number);
+      const distance = abs(x - roadX) + abs(y - roadY);
+      if (distance > maxDistance) continue;
+      if (!closest || distance < closest.distance) {
+        closest = { x: roadX, y: roadY, distance };
+      }
+    }
+
+    return closest;
+  }
+
+  getUrbanBlockKey(cityState, x, y) {
+    const column = floor((x - cityState.centerCell.x + cityState.gridColumns * 4) / 4);
+    const row = floor((y - cityState.centerCell.y + cityState.gridRows * 4) / 4);
+    return `${column},${row}`;
+  }
+
+  countPlannedStreetCells() {
+    return this.streetTarget;
   }
 
   // The city rendering mechanic reads the generated heights and draws the buildings.
