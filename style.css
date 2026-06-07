@@ -5,6 +5,7 @@
   --roof: #79c7c8;
   --road: #dcefed;
   --park: #b9d9b4;
+  --accent: #d8bd6a;
 }
 
 * {
@@ -19,7 +20,7 @@ body {
   overflow: hidden;
   background: var(--paper);
   color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Segoe UI", Arial, sans-serif;
 }
 
 canvas {
@@ -31,13 +32,13 @@ canvas {
   position: fixed;
   z-index: 10;
   width: min(380px, calc(100vw - 36px));
-  padding: 16px 18px;
-  border: 1px solid rgba(35, 58, 56, 0.24);
-  border-radius: 18px;
-  background: rgba(245, 247, 241, 0.82);
+  padding: 14px 16px;
+  border: 1px solid rgba(35, 58, 56, 0.18);
+  border-radius: 12px;
+  background: rgba(248, 250, 245, 0.74);
   color: var(--ink);
-  box-shadow: 0 18px 50px rgba(22, 51, 48, 0.12);
-  backdrop-filter: blur(10px);
+  box-shadow: 0 18px 54px rgba(22, 51, 48, 0.1);
+  backdrop-filter: blur(16px) saturate(1.05);
 }
 
 .hud {
@@ -53,8 +54,10 @@ canvas {
 h1,
 h2 {
   margin: 0 0 8px;
-  font-size: 21px;
-  letter-spacing: 0.01em;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  line-height: 1.08;
+  letter-spacing: 0;
 }
 
 h2 {
@@ -64,7 +67,7 @@ h2 {
 p {
   margin: 0 0 10px;
   color: rgba(35, 58, 56, 0.82);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -81,17 +84,24 @@ p:last-child {
 
 button {
   border: 1px solid rgba(35, 58, 56, 0.34);
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 9px 14px;
-  background: rgba(121, 199, 200, 0.26);
+  background: rgba(121, 199, 200, 0.28);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
 }
 
 button:not(:disabled):hover {
   background: rgba(121, 199, 200, 0.42);
+  border-color: rgba(35, 58, 56, 0.48);
+  transform: translateY(-1px);
 }
 
 button:disabled {
@@ -107,4 +117,25 @@ button:disabled {
   padding-top: 7px;
   margin-top: 7px;
   font-size: 12px;
+}
+
+.data-row strong {
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .hud,
+  .building-info {
+    width: calc(100vw - 24px);
+    left: 12px;
+    right: auto;
+  }
+
+  .hud {
+    top: 12px;
+  }
+
+  .building-info {
+    bottom: 12px;
+  }
 }

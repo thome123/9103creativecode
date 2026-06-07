@@ -12,12 +12,19 @@ const CITY_PALETTE = {
   line: '#233a38',
   roof: '#79c7c8',
   roofDark: '#54aeb0',
+  roofWarm: '#d8bd6a',
+  roofCool: '#7fb8d6',
   park: '#b9d9b4',
   parkDark: '#6fa878',
+  light: '#f4d980',
   front: '#f7faf5',
   side: '#e4ece8',
   shadow: '#9fb7b2',
 };
+
+const BUILDING_HOVER_LIFT = 18;
+const BUILDING_HOVER_FLOAT = 3;
+const BUILDING_HOVER_SPEED = 0.14;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -45,6 +52,7 @@ function draw() {
   inputMechanic.update(cityState);
 
   drawCityBackground();
+  drawAudioPulseRings();
   drawRoadGrid();
   drawGeneratedLots();
   drawParks();
@@ -96,6 +104,7 @@ function createDefaultCityState() {
     plannedStreetTarget: 0,
     developmentLots: [],
     parkTiles: new Set(),
+    pulseRings: [],
     nextBuildingId: 1,
     maxBuildings: 105,
     selectedBuilding: null,
@@ -125,15 +134,41 @@ function processAudioBuildingRequests() {
 
     if (cityState.buildings.length >= cityState.maxBuildings) return;
 
-    maybeGenerateParkTile(snapshot);
     const cell = pickNextBuildCell(snapshot);
     if (!cell) return;
 
+    if (random() >= 0.8) {
+      cityState.parkTiles.add(cellKey(cell.x, cell.y));
+      continue;
+    }
+
     const building = createBuildingFromMechanics(cell, snapshot, cityState.nextBuildingId);
+    initializeBuildingHoverState(building);
+    building.createdFrame = frameCount;
     cityState.nextBuildingId += 1;
     cityState.buildings.push(building);
     markBuildingFootprint(building);
+    addPulseRingForBuilding(building, snapshot);
   }
+}
+
+function addPulseRingForBuilding(building, snapshot) {
+  cityState.pulseRings.push({
+    gridX: building.gridX + (building.width || 1) * 0.5,
+    gridY: building.gridY + (building.depth || 1) * 0.5,
+    strength: snapshot.strength,
+    dominant: snapshot.dominant,
+    startedAt: frameCount,
+  });
+
+  cityState.pulseRings = cityState.pulseRings.filter((ring) => frameCount - ring.startedAt < 90).slice(-18);
+}
+
+function initializeBuildingHoverState(building) {
+  // This code was generated with the help of ChatGPT and initializes per-building hover lift animation state.
+  building.hoverLift = building.hoverLift || 0;
+  building.hoverLiftTarget = building.hoverLiftTarget || 0;
+  building.hoverFloatPhase = building.hoverFloatPhase ?? randomSeeded((building.seed || building.id) + building.id * 19, 0, TWO_PI);
 }
 
 function createBuildingFromMechanics(cell, audioSnapshot, id) {
@@ -190,6 +225,8 @@ function pickBuildingType(audioSnapshot, height) {
 }
 
 function pickRoofColour(audioSnapshot, type) {
+  if (audioSnapshot.dominant === 'bass') return '#7fb8d6';
+  if (audioSnapshot.dominant === 'treble') return '#d8bd6a';
   if (type === 'light pavilion') return '#92d6d4';
   if (type === 'civic block') return '#62b9bb';
   if (audioSnapshot.dominant === 'mid') return '#79c7c8';
@@ -837,6 +874,36 @@ function drawCityBackground() {
   }
 }
 
+function drawAudioPulseRings() {
+  cityState.pulseRings = cityState.pulseRings.filter((ring) => frameCount - ring.startedAt < 90);
+
+  push();
+  noFill();
+  for (const ring of cityState.pulseRings) {
+    const age = frameCount - ring.startedAt;
+    const fade = 1 - age / 90;
+    const radius = cityState.tileW * (0.36 + age * 0.022 + ring.strength * 0.38);
+    const centre = isoToScreen(ring.gridX, ring.gridY, 2);
+    const ringColour = getBandColour(ring.dominant);
+    stroke(red(ringColour), green(ringColour), blue(ringColour), 88 * fade);
+    strokeWeight(1.2 + ring.strength * 1.5);
+    beginShape();
+    vertex(centre.x, centre.y - radius * 0.48);
+    vertex(centre.x + radius, centre.y);
+    vertex(centre.x, centre.y + radius * 0.48);
+    vertex(centre.x - radius, centre.y);
+    endShape(CLOSE);
+  }
+  pop();
+}
+
+function getBandColour(dominant) {
+  if (dominant === 'bass') return color(cityState.palette.roofCool);
+  if (dominant === 'treble') return color(cityState.palette.roofWarm);
+  if (dominant === 'mid') return color(cityState.palette.roof);
+  return color(cityState.palette.line);
+}
+
 function drawRoadGrid() {
   for (const key of cityState.roadTiles) {
     const road = parseCellKey(key);
@@ -847,6 +914,7 @@ function drawRoadGrid() {
       fillColour: getRoadColour(roadMeta),
       strokeColour: cityState.palette.line,
       strokeAlpha: 92,
+      strokeWeight: roadMeta && roadMeta.kind === 'main avenue' ? 1.25 : 0.75,
     });
   }
 }
@@ -854,7 +922,8 @@ function drawRoadGrid() {
 function getRoadColour(roadMeta) {
   const base = color(cityState.palette.road);
   if (!roadMeta) return base;
-  if (roadMeta.dominant === 'bass') return lerpColor(base, color('#c8e1dc'), 0.38);
+  if (roadMeta.kind === 'main avenue') return lerpColor(base, color('#c8ddda'), 0.44);
+  if (roadMeta.dominant === 'bass') return lerpColor(base, color('#c8deea'), 0.38);
   if (roadMeta.dominant === 'mid') return lerpColor(base, color('#d6f0ee'), 0.32);
   if (roadMeta.dominant === 'treble') return lerpColor(base, color('#e8f6f2'), 0.42);
   return base;
@@ -881,7 +950,7 @@ function drawIsoTile(tile) {
   const d = isoToScreen(tile.x, tile.y + (tile.depth || 1));
 
   fill(tile.fillColour);
-  strokeWeight(1);
+  strokeWeight(tile.strokeWeight || 1);
   const strokeC = color(tile.strokeColour || cityState.palette.line);
   stroke(red(strokeC), green(strokeC), blue(strokeC), tile.strokeAlpha ?? 90);
   quad(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y);
@@ -928,23 +997,30 @@ function drawBuildings() {
 }
 
 function drawIsoBuilding(building) {
+  initializeBuildingHoverState(building);
   const h = building.height;
   const gx = building.gridX;
   const gy = building.gridY;
   const bw = building.width || 1;
   const bd = building.depth || 1;
-  const a0 = isoToScreen(gx, gy, 0);
-  const b0 = isoToScreen(gx + bw, gy, 0);
-  const c0 = isoToScreen(gx + bw, gy + bd, 0);
-  const d0 = isoToScreen(gx, gy + bd, 0);
-  const a = isoToScreen(gx, gy, h);
-  const b = isoToScreen(gx + bw, gy, h);
-  const c = isoToScreen(gx + bw, gy + bd, h);
-  const d = isoToScreen(gx, gy + bd, h);
   const isHovered = cityState.hoveredBuilding && cityState.hoveredBuilding.id === building.id;
   const isSelected = cityState.selectedBuilding && cityState.selectedBuilding.id === building.id;
   const lineWeight = isHovered || isSelected ? 2.4 : 1.25;
   const lineColour = isHovered || isSelected ? color('#178f92') : color(cityState.palette.line);
+  const liftOffset = updateBuildingHoverLift(building, isHovered);
+
+  const a0Ground = isoToScreen(gx, gy, 0);
+  const b0Ground = isoToScreen(gx + bw, gy, 0);
+  const c0Ground = isoToScreen(gx + bw, gy + bd, 0);
+  const d0Ground = isoToScreen(gx, gy + bd, 0);
+  const a0 = isoToScreen(gx, gy, liftOffset);
+  const b0 = isoToScreen(gx + bw, gy, liftOffset);
+  const c0 = isoToScreen(gx + bw, gy + bd, liftOffset);
+  const d0 = isoToScreen(gx, gy + bd, liftOffset);
+  const a = isoToScreen(gx, gy, h + liftOffset);
+  const b = isoToScreen(gx + bw, gy, h + liftOffset);
+  const c = isoToScreen(gx + bw, gy + bd, h + liftOffset);
+  const d = isoToScreen(gx, gy + bd, h + liftOffset);
 
   building.bounds = {
     minX: min(a.x, b.x, c.x, d.x, a0.x, b0.x, c0.x, d0.x),
@@ -959,6 +1035,8 @@ function drawIsoBuilding(building) {
     front: [c, d, d0, c0],
   };
 
+  drawBuildingShadow(a0Ground, b0Ground, c0Ground, d0Ground, building);
+
   stroke(lineColour);
   strokeWeight(lineWeight);
   fill(timeMechanic.tintBuildingColour(building.sideColour || cityState.palette.side, cityState, 0.92));
@@ -971,6 +1049,42 @@ function drawIsoBuilding(building) {
   drawWindows(building, b, c, c0, b0, 'side');
   drawWindows(building, c, d, d0, c0, 'front');
   drawRoofDetails(building, a, b, c, d);
+}
+
+function updateBuildingHoverLift(building, isHovered) {
+  // This code was generated with the help of ChatGPT and makes hovered buildings rise, float, then settle back down.
+  building.hoverLiftTarget = isHovered ? BUILDING_HOVER_LIFT : 0;
+  building.hoverLift = lerp(building.hoverLift, building.hoverLiftTarget, BUILDING_HOVER_SPEED);
+
+  if (abs(building.hoverLift) < 0.05 && building.hoverLiftTarget === 0) {
+    building.hoverLift = 0;
+  }
+
+  const liftAmount = constrain(building.hoverLift / BUILDING_HOVER_LIFT, 0, 1);
+  const floatOffset = sin(frameCount * 0.08 + building.hoverFloatPhase) * BUILDING_HOVER_FLOAT * liftAmount;
+  return building.hoverLift + floatOffset;
+}
+
+function drawBuildingShadow(a0, b0, c0, d0, building) {
+  const age = building.createdFrame ? min(1, (frameCount - building.createdFrame) / 36) : 1;
+  const growOffset = (1 - age) * 9;
+  const shadowAlpha = map(constrain(building.height, 12, 88), 12, 88, 20, 46);
+  const liftAmount = constrain((building.hoverLift || 0) / BUILDING_HOVER_LIFT, 0, 1);
+
+  push();
+  noStroke();
+  fill(35, 58, 56, shadowAlpha * age * (1 - liftAmount * 0.34));
+  quad(
+    a0.x + 4 + growOffset + liftAmount * 5,
+    a0.y + 7,
+    b0.x + 9 + growOffset + liftAmount * 5,
+    b0.y + 7,
+    c0.x + 13 + growOffset + liftAmount * 7,
+    c0.y + 10,
+    d0.x + 8 + growOffset + liftAmount * 7,
+    d0.y + 10,
+  );
+  pop();
 }
 
 function drawWindows(building, topA, topB, bottomB, bottomA, face) {
@@ -997,6 +1111,36 @@ function drawWindows(building, topA, topB, bottomB, bottomA, face) {
     const end = p5.Vector.lerp(top, bottom, 0.86);
     line(start.x, start.y, end.x, end.y);
   }
+
+  drawWindowLights(building, topA, topB, bottomB, bottomA, face, floors, divisions);
+}
+
+function drawWindowLights(building, topA, topB, bottomB, bottomA, face, floors, divisions) {
+  const nightAmount = cityState.timeOfDay > 0.68 ? map(cityState.timeOfDay, 0.68, 1, 0, 1) : 0;
+  const musicGlow = cityState.audioSnapshot ? cityState.audioSnapshot.level : 0;
+  const lightChance = constrain(nightAmount * 0.38 + musicGlow * 0.18, 0, 0.52);
+  if (lightChance <= 0.02) return;
+
+  push();
+  stroke(244, 217, 128, 130 + nightAmount * 95);
+  strokeWeight(1.15);
+  for (let floorIndex = 1; floorIndex <= floors; floorIndex++) {
+    const t = floorIndex / (floors + 1);
+    const left = p5.Vector.lerp(topA, bottomA, t);
+    const right = p5.Vector.lerp(topB, bottomB, t);
+
+    for (let divisionIndex = 0; divisionIndex < divisions; divisionIndex++) {
+      const seed = building.seed + floorIndex * 31 + divisionIndex * 67 + (face === 'front' ? 7 : 17);
+      if (randomSeeded(seed, 0, 1) > lightChance) continue;
+
+      const startT = map(divisionIndex, 0, divisions, 0.24, 0.72);
+      const endT = startT + 0.1;
+      const start = p5.Vector.lerp(left, right, startT);
+      const end = p5.Vector.lerp(left, right, min(0.82, endT));
+      line(start.x, start.y, end.x, end.y);
+    }
+  }
+  pop();
 }
 
 function getFacadeDivisions(building, face) {
@@ -1029,6 +1173,8 @@ function drawRoofDetails(building, a, b, c, d) {
   if (building.facadeStyle === 'banded' || building.facadeStyle === 'block') {
     drawRooftopUnit(building, a, b, c, d);
   }
+
+  drawRoofAudioMark(building, a, b, c, d);
 }
 
 function drawRooftopUnit(building, a, b, c, d) {
@@ -1045,6 +1191,36 @@ function drawRooftopUnit(building, a, b, c, d) {
   stroke(35, 58, 56, 105);
   strokeWeight(0.65);
   quad(u1.x, u1.y, u2.x, u2.y, u3.x, u3.y, u4.x, u4.y);
+}
+
+function drawRoofAudioMark(building, a, b, c, d) {
+  const centre = createVector((a.x + b.x + c.x + d.x) / 4, (a.y + b.y + c.y + d.y) / 4);
+  const accent = getBandColour(building.dominant);
+  const activeBoost = cityState.audioSnapshot && cityState.audioSnapshot.dominant === building.dominant ? cityState.audioSnapshot.level : 0;
+
+  push();
+  stroke(red(accent), green(accent), blue(accent), 130 + activeBoost * 85);
+  strokeWeight(0.9 + activeBoost * 1.4);
+
+  if (building.dominant === 'treble') {
+    fill(red(accent), green(accent), blue(accent), 52 + activeBoost * 90);
+    ellipse(centre.x, centre.y, 5 + activeBoost * 8, 3 + activeBoost * 4);
+  } else if (building.dominant === 'bass') {
+    const p1 = p5.Vector.lerp(a, c, 0.42);
+    const p2 = p5.Vector.lerp(a, c, 0.58);
+    const q1 = p5.Vector.lerp(b, d, 0.42);
+    const q2 = p5.Vector.lerp(b, d, 0.58);
+    line(p1.x, p1.y, q1.x, q1.y);
+    line(p2.x, p2.y, q2.x, q2.y);
+  } else {
+    noFill();
+    const ia = p5.Vector.lerp(a, centre, 0.36);
+    const ib = p5.Vector.lerp(b, centre, 0.36);
+    const ic = p5.Vector.lerp(c, centre, 0.36);
+    const id = p5.Vector.lerp(d, centre, 0.36);
+    quad(ia.x, ia.y, ib.x, ib.y, ic.x, ic.y, id.x, id.y);
+  }
+  pop();
 }
 
 function mousePressed() {
