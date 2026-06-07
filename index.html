@@ -8,18 +8,35 @@
     <script src="https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/p5.min.js"></script>
   </head>
   <body>
-    <main class="hud">
-      <h1>Audio-Generated Isometric City</h1>
-      <p>Upload a track and press play. The music gradually draws a clean architectural 2.5D city.</p>
-      <div class="controls">
-        <button id="chooseAudio" type="button">Choose Audio</button>
-        <button id="playPause" type="button" disabled>Play</button>
+    <div class="map-frame" aria-hidden="true">
+      <span></span>
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+
+    <section class="left-panel" aria-label="City generation controls">
+      <header class="city-header">
+        <div>
+          <div class="panel-kicker">Audio Urbanism Lab</div>
+          <h1>Isometric City Generator</h1>
+        </div>
+        <p class="intro">Sound draws the street plan first. Later beats develop buildings inside the generated blocks.</p>
+        <p id="cityStats" class="city-meter">Buildings: 0</p>
+      </header>
+
+      <div class="audio-dock">
+        <div class="dock-label">Sound Source</div>
+        <div class="controls" aria-label="Audio controls">
+          <button id="chooseAudio" type="button">Choose Audio</button>
+          <button id="playPause" type="button" disabled>Play</button>
+        </div>
+        <p id="audioStatus" class="audio-status">No audio loaded.</p>
       </div>
-      <p id="audioStatus">No audio loaded.</p>
-      <p id="cityStats">Buildings: 0</p>
-    </main>
+    </section>
 
     <aside id="buildingInfo" class="building-info" aria-live="polite">
+      <div class="panel-kicker">Selected Parcel</div>
       <h2>Building Archive</h2>
       <p>Click a generated building to inspect its audio data.</p>
     </aside>

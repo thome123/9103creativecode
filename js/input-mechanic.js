@@ -183,11 +183,16 @@ class InputMechanic {
   renderInfo(building) {
     if (!this.infoPanel) return;
     if (!building) {
-      this.infoPanel.innerHTML = '<h2>Building Archive</h2><p>Click a generated building to inspect its audio data.</p>';
+      this.infoPanel.innerHTML = `
+        <div class="panel-kicker">Selected Parcel</div>
+        <h2>Building Archive</h2>
+        <p>Click a generated building to inspect its audio data.</p>
+      `;
       return;
     }
 
     this.infoPanel.innerHTML = `
+      <div class="panel-kicker">Selected Parcel</div>
       <h2>Building #${building.id}</h2>
       <p>${building.type} generated at ${building.createdAtLabel} from the uploaded track.</p>
       <div class="data-row"><span>Footprint</span><strong>${building.width || 1} x ${building.depth || 1} lots</strong></div>
