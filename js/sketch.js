@@ -25,6 +25,8 @@ const CITY_PALETTE = {
 const BUILDING_HOVER_LIFT = 18;
 const BUILDING_HOVER_FLOAT = 3;
 const BUILDING_HOVER_SPEED = 0.14;
+const BUILDING_VIEW_MARGIN = 12;
+const BUILDING_SAFE_HEIGHT = 96;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -57,6 +59,7 @@ function draw() {
   drawGeneratedLots();
   drawParks();
   drawBuildings();
+  drawTimeIndicator();
   inputMechanic.draw(cityState);
   audioMechanic.updateHud(cityState);
 }
@@ -120,8 +123,38 @@ function createDefaultCityState() {
 function updateCityLayout() {
   cityState.tileW = constrain(width / 36, 22, 44);
   cityState.tileH = cityState.tileW * 0.5;
-  cityState.originX = width * 0.5;
-  cityState.originY = max(88, height * 0.08);
+  const viewBounds = getCityViewBounds();
+  const viewCenterX = (viewBounds.left + viewBounds.right) * 0.5;
+  const viewCenterY = (viewBounds.top + viewBounds.bottom) * 0.5;
+  cityState.originX = viewCenterX - (cityState.gridColumns - cityState.gridRows) * cityState.tileW * 0.25;
+  cityState.originY = max(88, viewCenterY - (cityState.gridColumns + cityState.gridRows) * cityState.tileH * 0.25);
+}
+
+function getCityViewBounds() {
+  if (width <= 760) {
+    return {
+      left: 12,
+      right: width - 12,
+      top: 12,
+      bottom: height - 12,
+    };
+  }
+
+  if (width <= 1120) {
+    return {
+      left: 22,
+      right: width - 22,
+      top: 230,
+      bottom: max(438, height - 330),
+    };
+  }
+
+  return {
+    left: 382,
+    right: width - 342,
+    top: 22,
+    bottom: height - 22,
+  };
 }
 
 function processAudioBuildingRequests() {
@@ -143,6 +176,8 @@ function processAudioBuildingRequests() {
     }
 
     const building = createBuildingFromMechanics(cell, snapshot, cityState.nextBuildingId);
+    if (!isBuildingDrawable(building)) return;
+
     initializeBuildingHoverState(building);
     building.createdFrame = frameCount;
     cityState.nextBuildingId += 1;
@@ -588,6 +623,7 @@ function pickNextBuildCell(snapshot) {
     for (const footprint of getFootprintOptions(snapshot)) {
       const lot = orientFootprintAwayFromRoad(anchor, roadCell, footprint);
       if (!lot || !isFootprintBuildable(lot.x, lot.y, lot.width, lot.depth)) continue;
+      if (!isFootprintDrawable(lot.x, lot.y, lot.width, lot.depth, BUILDING_SAFE_HEIGHT)) continue;
 
       const centreX = lot.x + lot.width * 0.5;
       const centreY = lot.y + lot.depth * 0.5;
@@ -595,10 +631,11 @@ function pickNextBuildCell(snapshot) {
       const roadEdges = countFootprintRoadEdges(lot.x, lot.y, lot.width, lot.depth);
       const occupiedEdges = countFootprintOccupiedEdges(lot.x, lot.y, lot.width, lot.depth);
       const blockLoad = countBuildingsInBlock(lot.x, lot.y);
+      const area = lot.width * lot.depth;
+      if (area > 1 && occupiedEdges > 0) continue;
       if (occupiedEdges > getNeighbourPressureLimit(snapshot)) continue;
       if (blockLoad >= getBlockBuildingLimit(snapshot)) continue;
 
-      const area = lot.width * lot.depth;
       candidates.push({
         ...lot,
         score: distance - roadEdges * 0.42 - area * 0.08 + occupiedEdges * 0.84 + blockLoad * 0.58 + getSetbackScore(anchor) + random(0, 1.7),
@@ -719,6 +756,47 @@ function isFootprintBuildable(x, y, width, depth) {
     }
   }
   return true;
+}
+
+function isFootprintDrawable(x, y, footprintWidth, footprintDepth, projectedHeight) {
+  const bounds = getProjectedBuildingBounds(x, y, footprintWidth, footprintDepth, projectedHeight + BUILDING_HOVER_LIFT + BUILDING_HOVER_FLOAT);
+  return isProjectedBoundsInsideCanvas(bounds);
+}
+
+function isBuildingDrawable(building) {
+  const projectedHeight = (building.height || BUILDING_SAFE_HEIGHT) + BUILDING_HOVER_LIFT + BUILDING_HOVER_FLOAT;
+  const bounds = getProjectedBuildingBounds(building.gridX, building.gridY, building.width || 1, building.depth || 1, projectedHeight);
+  return isProjectedBoundsInsideCanvas(bounds);
+}
+
+function getProjectedBuildingBounds(gridX, gridY, footprintWidth, footprintDepth, projectedHeight) {
+  const groundPoints = [
+    isoToScreen(gridX, gridY, 0),
+    isoToScreen(gridX + footprintWidth, gridY, 0),
+    isoToScreen(gridX + footprintWidth, gridY + footprintDepth, 0),
+    isoToScreen(gridX, gridY + footprintDepth, 0),
+  ];
+  const roofPoints = groundPoints.map((point) => createVector(point.x, point.y - projectedHeight));
+  const points = [...groundPoints, ...roofPoints];
+  const pointXValues = points.map((point) => point.x);
+  const pointYValues = points.map((point) => point.y);
+
+  return {
+    minX: Math.min(...pointXValues),
+    maxX: Math.max(...pointXValues),
+    minY: Math.min(...pointYValues),
+    maxY: Math.max(...pointYValues),
+  };
+}
+
+function isProjectedBoundsInsideCanvas(bounds) {
+  const viewBounds = getCityViewBounds();
+  return (
+    bounds.minX >= viewBounds.left + BUILDING_VIEW_MARGIN &&
+    bounds.maxX <= viewBounds.right - BUILDING_VIEW_MARGIN &&
+    bounds.minY >= viewBounds.top + BUILDING_VIEW_MARGIN &&
+    bounds.maxY <= viewBounds.bottom - BUILDING_VIEW_MARGIN
+  );
 }
 
 function markBuildingFootprint(building) {
@@ -874,6 +952,43 @@ function drawCityBackground() {
   }
 }
 
+function drawTimeIndicator() {
+  const nightAmount = timeMechanic.getNightAmount(cityState);
+  const viewBounds = getCityViewBounds();
+  const markerX = constrain(viewBounds.right - 88, viewBounds.left + 88, viewBounds.right - 88);
+  const markerY = viewBounds.top + 46;
+  const isNight = nightAmount > 0.48;
+  const iconColour = isNight ? color('#e8eff5') : color('#f0b25f');
+
+  push();
+  rectMode(CENTER);
+  noStroke();
+  fill(250, 248, 239, 196);
+  rect(markerX, markerY, 156, 58, 3);
+
+  stroke(35, 58, 56, 70);
+  strokeWeight(1);
+  line(markerX - 52, markerY + 9, markerX + 52, markerY + 9);
+
+  const orbitPosition = map(cityState.timeOfDay, 0, 1, -52, 52);
+  const orbitLift = sin(cityState.timeOfDay * TWO_PI) * 12;
+  noStroke();
+  fill(iconColour);
+  ellipse(markerX + orbitPosition, markerY + 9 - orbitLift, 18, 18);
+
+  if (isNight) {
+    fill(250, 248, 239, 220);
+    ellipse(markerX + orbitPosition + 6, markerY + 5 - orbitLift, 15, 15);
+  }
+
+  fill(31, 45, 43, 190);
+  textAlign(CENTER, CENTER);
+  textSize(11);
+  textStyle(BOLD);
+  text(cityState.timeLabel, markerX, markerY - 16);
+  pop();
+}
+
 function drawAudioPulseRings() {
   cityState.pulseRings = cityState.pulseRings.filter((ring) => frameCount - ring.startedAt < 90);
 
@@ -988,15 +1103,43 @@ function drawTree(gridX, gridY) {
 }
 
 function drawBuildings() {
-  const sortedBuildings = [...cityState.buildings].sort(
-    (a, b) => (a.gridX + a.gridY + a.width + a.depth) - (b.gridX + b.gridY + b.width + b.depth)
-  );
+  const sortedBuildings = [...cityState.buildings].sort(compareBuildingsForIsoDraw);
+  for (const building of sortedBuildings) {
+    drawIsoBuildingShadow(building);
+  }
+
   for (const building of sortedBuildings) {
     drawIsoBuilding(building);
   }
 }
 
+function compareBuildingsForIsoDraw(a, b) {
+  const aDepth = getBuildingBaseDepth(a);
+  const bDepth = getBuildingBaseDepth(b);
+  if (aDepth !== bDepth) return aDepth - bDepth;
+  if (a.gridY !== b.gridY) return a.gridY - b.gridY;
+  if (a.gridX !== b.gridX) return a.gridX - b.gridX;
+  return (a.height || 0) - (b.height || 0);
+}
+
+function getBuildingBaseDepth(building) {
+  return building.gridX + building.gridY + (building.width || 1) + (building.depth || 1);
+}
+
+function drawIsoBuildingShadow(building) {
+  const gx = building.gridX;
+  const gy = building.gridY;
+  const bw = building.width || 1;
+  const bd = building.depth || 1;
+  const a0Ground = isoToScreen(gx, gy, 0);
+  const b0Ground = isoToScreen(gx + bw, gy, 0);
+  const c0Ground = isoToScreen(gx + bw, gy + bd, 0);
+  const d0Ground = isoToScreen(gx, gy + bd, 0);
+  drawBuildingShadow(a0Ground, b0Ground, c0Ground, d0Ground, building);
+}
+
 function drawIsoBuilding(building) {
+  push();
   initializeBuildingHoverState(building);
   const h = building.height;
   const gx = building.gridX;
@@ -1009,10 +1152,6 @@ function drawIsoBuilding(building) {
   const lineColour = isHovered || isSelected ? color('#178f92') : color(cityState.palette.line);
   const liftOffset = updateBuildingHoverLift(building, isHovered);
 
-  const a0Ground = isoToScreen(gx, gy, 0);
-  const b0Ground = isoToScreen(gx + bw, gy, 0);
-  const c0Ground = isoToScreen(gx + bw, gy + bd, 0);
-  const d0Ground = isoToScreen(gx, gy + bd, 0);
   const a0 = isoToScreen(gx, gy, liftOffset);
   const b0 = isoToScreen(gx + bw, gy, liftOffset);
   const c0 = isoToScreen(gx + bw, gy + bd, liftOffset);
@@ -1035,8 +1174,6 @@ function drawIsoBuilding(building) {
     front: [c, d, d0, c0],
   };
 
-  drawBuildingShadow(a0Ground, b0Ground, c0Ground, d0Ground, building);
-
   stroke(lineColour);
   strokeWeight(lineWeight);
   fill(timeMechanic.tintBuildingColour(building.sideColour || cityState.palette.side, cityState, 0.92));
@@ -1049,6 +1186,7 @@ function drawIsoBuilding(building) {
   drawWindows(building, b, c, c0, b0, 'side');
   drawWindows(building, c, d, d0, c0, 'front');
   drawRoofDetails(building, a, b, c, d);
+  pop();
 }
 
 function updateBuildingHoverLift(building, isHovered) {
@@ -1070,19 +1208,20 @@ function drawBuildingShadow(a0, b0, c0, d0, building) {
   const growOffset = (1 - age) * 9;
   const shadowAlpha = map(constrain(building.height, 12, 88), 12, 88, 20, 46);
   const liftAmount = constrain((building.hoverLift || 0) / BUILDING_HOVER_LIFT, 0, 1);
+  const shadow = timeMechanic.getShadowProfile(cityState);
 
   push();
   noStroke();
-  fill(35, 58, 56, shadowAlpha * age * (1 - liftAmount * 0.34));
+  fill(20, 35, 45, shadowAlpha * shadow.alpha * age * (1 - liftAmount * 0.34));
   quad(
-    a0.x + 4 + growOffset + liftAmount * 5,
-    a0.y + 7,
-    b0.x + 9 + growOffset + liftAmount * 5,
-    b0.y + 7,
-    c0.x + 13 + growOffset + liftAmount * 7,
-    c0.y + 10,
-    d0.x + 8 + growOffset + liftAmount * 7,
-    d0.y + 10,
+    a0.x + shadow.x * 0.4 + growOffset + liftAmount * 5,
+    a0.y + shadow.y * 0.7,
+    b0.x + shadow.x * 0.72 + growOffset + liftAmount * 5,
+    b0.y + shadow.y * 0.7,
+    c0.x + shadow.x * shadow.stretch + growOffset + liftAmount * 7,
+    c0.y + shadow.y * shadow.stretch,
+    d0.x + shadow.x * 1.08 + growOffset + liftAmount * 7,
+    d0.y + shadow.y * shadow.stretch,
   );
   pop();
 }
@@ -1116,14 +1255,14 @@ function drawWindows(building, topA, topB, bottomB, bottomA, face) {
 }
 
 function drawWindowLights(building, topA, topB, bottomB, bottomA, face, floors, divisions) {
-  const nightAmount = cityState.timeOfDay > 0.68 ? map(cityState.timeOfDay, 0.68, 1, 0, 1) : 0;
+  const nightAmount = timeMechanic.getWindowLightAmount(cityState);
   const musicGlow = cityState.audioSnapshot ? cityState.audioSnapshot.level : 0;
-  const lightChance = constrain(nightAmount * 0.38 + musicGlow * 0.18, 0, 0.52);
+  const lightChance = constrain(nightAmount * 0.72 + musicGlow * 0.18, 0, 0.78);
   if (lightChance <= 0.02) return;
 
   push();
-  stroke(244, 217, 128, 130 + nightAmount * 95);
-  strokeWeight(1.15);
+  stroke(255, 220, 124, 145 + nightAmount * 110);
+  strokeWeight(1.1 + nightAmount * 0.5);
   for (let floorIndex = 1; floorIndex <= floors; floorIndex++) {
     const t = floorIndex / (floors + 1);
     const left = p5.Vector.lerp(topA, bottomA, t);

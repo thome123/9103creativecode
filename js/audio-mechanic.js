@@ -11,6 +11,8 @@ class AudioMechanic {
     this.requests = [];
     this.lastBuildFrame = 0;
     this.minBuildFrames = 72;
+    this.silenceThreshold = 0.035;
+    this.maxQueuedRequests = 3;
     this.snapshot = this.emptySnapshot();
     this.resetCity = null;
   }
@@ -131,7 +133,14 @@ class AudioMechanic {
     };
     cityState.audioSnapshot = this.snapshot;
 
-    if (frameCount - this.lastBuildFrame >= this.minBuildFrames && cityState.buildings.length < cityState.maxBuildings) {
+    // Keep city growth tied to audible moments, not silent gaps or stacked-up old requests.
+    const canRequestGrowth =
+      strength > this.silenceThreshold &&
+      this.requests.length < this.maxQueuedRequests &&
+      frameCount - this.lastBuildFrame >= this.minBuildFrames &&
+      cityState.buildings.length < cityState.maxBuildings;
+
+    if (canRequestGrowth) {
       const chance = constrain(0.28 + strength * 0.48, 0.28, 0.82);
       if (random() < chance) {
         this.requests.push({ ...this.snapshot });
@@ -161,11 +170,16 @@ class AudioMechanic {
   updateHud(cityState) {
     if (!this.stats) return;
     const label = cityState.timeLabel || 'Day';
+    const audioLabel =
+      cityState.audioSnapshot && cityState.audioSnapshot.dominant !== 'none'
+        ? ` | Audio: ${cityState.audioSnapshot.dominant}`
+        : '';
+
     if (cityState.generationPhase === 'roads') {
-      this.stats.textContent = `Streets: ${cityState.roadTiles.size}/${cityState.plannedStreetTarget} | Time: ${label}`;
+      this.stats.textContent = `Streets: ${cityState.roadTiles.size}/${cityState.plannedStreetTarget} | Time: ${label}${audioLabel}`;
       return;
     }
-    this.stats.textContent = `Buildings: ${cityState.buildings.length}/${cityState.maxBuildings} | Blocks: ${cityState.developmentLots.length} | Time: ${label}`;
+    this.stats.textContent = `Buildings: ${cityState.buildings.length}/${cityState.maxBuildings} | Blocks: ${cityState.developmentLots.length} | Time: ${label}${audioLabel}`;
   }
 
   emptySnapshot() {
@@ -188,8 +202,12 @@ class AudioMechanic {
   }
 
   getDominantBand(bass, mid, treble) {
-    if (bass >= mid && bass >= treble) return 'bass';
-    if (mid >= bass && mid >= treble) return 'mid';
+    const bassScore = bass * 0.85;
+    const midScore = mid * 1.1;
+    const trebleScore = treble * 1.35;
+
+    if (bassScore >= midScore && bassScore >= trebleScore) return 'bass';
+    if (midScore >= bassScore && midScore >= trebleScore) return 'mid';
     return 'treble';
   }
 }
