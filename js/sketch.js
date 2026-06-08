@@ -113,6 +113,7 @@ function createDefaultCityState() {
     selectedBuilding: null,
     hoveredBuilding: null,
     audioSnapshot: null,
+    lotsExhausted: false,
     growthStalls: 0,
     timeOfDay: 0,
     timeLabel: 'Morning',
@@ -168,15 +169,23 @@ function processAudioBuildingRequests() {
     if (cityState.buildings.length >= cityState.maxBuildings) return;
 
     const cell = pickNextBuildCell(snapshot);
-    if (!cell) return;
+    if (!cell) {
+      cityState.lotsExhausted = true;
+      return;
+    }
 
-    if (random() >= 0.8) {
+    cityState.lotsExhausted = false;
+    const remainingBuildings = cityState.maxBuildings - cityState.buildings.length;
+    if (remainingBuildings > 6 && random() >= 0.8) {
       cityState.parkTiles.add(cellKey(cell.x, cell.y));
       continue;
     }
 
     const building = createBuildingFromMechanics(cell, snapshot, cityState.nextBuildingId);
-    if (!isBuildingDrawable(building)) return;
+    if (!isBuildingDrawable(building)) {
+      cityState.lotsExhausted = true;
+      return;
+    }
 
     initializeBuildingHoverState(building);
     building.createdFrame = frameCount;
@@ -1257,12 +1266,14 @@ function drawWindows(building, topA, topB, bottomB, bottomA, face) {
 function drawWindowLights(building, topA, topB, bottomB, bottomA, face, floors, divisions) {
   const nightAmount = timeMechanic.getWindowLightAmount(cityState);
   const musicGlow = cityState.audioSnapshot ? cityState.audioSnapshot.level : 0;
-  const lightChance = constrain(nightAmount * 0.72 + musicGlow * 0.18, 0, 0.78);
+  const lightChance = constrain(nightAmount * 0.9 + musicGlow * 0.24, 0, 0.92);
   if (lightChance <= 0.02) return;
 
   push();
-  stroke(255, 220, 124, 145 + nightAmount * 110);
-  strokeWeight(1.1 + nightAmount * 0.5);
+  drawingContext.shadowColor = `rgba(255, 214, 112, ${0.24 + nightAmount * 0.42})`;
+  drawingContext.shadowBlur = 3 + nightAmount * 7;
+  stroke(255, 228, 138, 175 + nightAmount * 80);
+  strokeWeight(1.25 + nightAmount * 0.75);
   for (let floorIndex = 1; floorIndex <= floors; floorIndex++) {
     const t = floorIndex / (floors + 1);
     const left = p5.Vector.lerp(topA, bottomA, t);
@@ -1279,6 +1290,7 @@ function drawWindowLights(building, topA, topB, bottomB, bottomA, face, floors, 
       line(start.x, start.y, end.x, end.y);
     }
   }
+  drawingContext.shadowBlur = 0;
   pop();
 }
 

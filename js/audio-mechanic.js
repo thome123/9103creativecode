@@ -22,6 +22,7 @@ class AudioMechanic {
     this.stats = document.getElementById('cityStats');
     this.chooseAudio = document.getElementById('chooseAudio');
     this.playPause = document.getElementById('playPause');
+    this.clearCity = document.getElementById('clearCity');
     this.audioInput = document.getElementById('audioInput');
     this.audioElement = document.getElementById('audioPlayer');
     this.AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -36,6 +37,7 @@ class AudioMechanic {
     this.chooseAudio.addEventListener('click', () => this.audioInput.click());
     this.audioInput.addEventListener('change', (event) => this.loadAudio(event));
     this.playPause.addEventListener('click', async () => this.togglePlayback());
+    this.clearCity.addEventListener('click', () => this.clearGeneratedCity());
     this.audioElement.addEventListener('ended', () => {
       this.playPause.textContent = 'Play';
       this.status.textContent = 'Audio ended.';
@@ -87,6 +89,21 @@ class AudioMechanic {
     this.requests.length = 0;
     this.lastBuildFrame = 0;
     this.snapshot = this.emptySnapshot();
+  }
+
+  clearGeneratedCity() {
+    if (this.audioElement) {
+      this.audioElement.pause();
+      this.audioElement.currentTime = 0;
+    }
+
+    this.resetGenerationState();
+    if (typeof this.resetCity === 'function') {
+      this.resetCity();
+    }
+
+    this.playPause.textContent = 'Play';
+    this.status.textContent = this.ready ? 'City cleared. Press Play to regenerate.' : 'City cleared.';
   }
 
   async ensureAudioContext() {
@@ -179,7 +196,8 @@ class AudioMechanic {
       this.stats.textContent = `Streets: ${cityState.roadTiles.size}/${cityState.plannedStreetTarget} | Time: ${label}${audioLabel}`;
       return;
     }
-    this.stats.textContent = `Buildings: ${cityState.buildings.length}/${cityState.maxBuildings} | Blocks: ${cityState.developmentLots.length} | Time: ${label}${audioLabel}`;
+    const capacityLabel = cityState.lotsExhausted ? ' | Lots full' : '';
+    this.stats.textContent = `Buildings: ${cityState.buildings.length}/${cityState.maxBuildings} | Blocks: ${cityState.developmentLots.length} | Time: ${label}${audioLabel}${capacityLabel}`;
   }
 
   emptySnapshot() {
