@@ -11,13 +11,22 @@ class AudioMechanic {
     this.requests = [];
     this.lastBuildFrame = 0;
     this.minBuildFrames = 72;
+    this.cityState = null;
+    this.defaultMaxBuildings = 105;
+    this.minDynamicBuildings = 48;
+    this.maxDynamicBuildings = 132;
+    this.roadDurationRatio = 0.14;
+    this.audioDuration = 0;
+    this.currentFileName = '';
+    this.buildPhaseStartSeconds = null;
     this.silenceThreshold = 0.035;
-    this.maxQueuedRequests = 3;
+    this.maxQueuedRequests = 1;
     this.snapshot = this.emptySnapshot();
     this.resetCity = null;
   }
 
   setup(cityState, resetCity) {
+    this.cityState = cityState;
     this.status = document.getElementById('audioStatus');
     this.stats = document.getElementById('cityStats');
     this.chooseAudio = document.getElementById('chooseAudio');
@@ -38,6 +47,7 @@ class AudioMechanic {
     this.audioInput.addEventListener('change', (event) => this.loadAudio(event));
     this.playPause.addEventListener('click', async () => this.togglePlayback());
     this.clearCity.addEventListener('click', () => this.clearGeneratedCity());
+    this.audioElement.addEventListener('loadedmetadata', () => this.updateAudioDuration());
     this.audioElement.addEventListener('ended', () => {
       this.playPause.textContent = 'Play';
       this.status.textContent = 'Audio ended.';
@@ -54,6 +64,8 @@ class AudioMechanic {
 
     this.audioElement.pause();
     this.resetGenerationState();
+    this.audioDuration = 0;
+    this.currentFileName = file.name;
     if (typeof this.resetCity === 'function') {
       this.resetCity();
     }
@@ -88,7 +100,18 @@ class AudioMechanic {
   resetGenerationState() {
     this.requests.length = 0;
     this.lastBuildFrame = 0;
+    this.buildPhaseStartSeconds = null;
     this.snapshot = this.emptySnapshot();
+  }
+
+  updateAudioDuration() {
+    if (!Number.isFinite(this.audioElement.duration)) return;
+
+    this.audioDuration = this.audioElement.duration;
+    this.applyDynamicBuildTarget();
+    if (this.currentFileName) {
+      this.status.textContent = `Loaded: ${this.currentFileName} (${this.formatTime(this.audioDuration)}) | Target: ${this.cityState.maxBuildings} buildings`;
+    }
   }
 
   clearGeneratedCity() {
@@ -101,6 +124,7 @@ class AudioMechanic {
     if (typeof this.resetCity === 'function') {
       this.resetCity();
     }
+    this.applyDynamicBuildTarget();
 
     this.playPause.textContent = 'Play';
     this.status.textContent = this.ready ? 'City cleared. Press Play to regenerate.' : 'City cleared.';
@@ -137,6 +161,7 @@ class AudioMechanic {
     const treble = this.averageRange(120, 260);
     const seconds = this.audioElement.currentTime;
     const strength = constrain(level * 1.8 + (bass + mid + treble) / 900, 0, 1.4);
+    this.updatePhaseTiming(cityState, seconds);
 
     this.snapshot = {
       level,
@@ -150,15 +175,20 @@ class AudioMechanic {
     };
     cityState.audioSnapshot = this.snapshot;
 
-    // Keep city growth tied to audible moments, not silent gaps or stacked-up old requests.
+    const scheduleLag = this.getScheduleLag(cityState);
+    const shouldCatchUp = scheduleLag > 0.05 || this.isNearTrackEnd(cityState);
+    const requestInterval = this.getRequestIntervalFrames(cityState);
+    const timedGrowth = this.hasTrackDuration();
+
+    // Keep city growth tied to the track timeline, while still responding to audible moments.
     const canRequestGrowth =
-      strength > this.silenceThreshold &&
+      (strength > this.silenceThreshold || shouldCatchUp || timedGrowth) &&
       this.requests.length < this.maxQueuedRequests &&
-      frameCount - this.lastBuildFrame >= this.minBuildFrames &&
-      cityState.buildings.length < cityState.maxBuildings;
+      frameCount - this.lastBuildFrame >= requestInterval &&
+      !this.isGenerationComplete(cityState);
 
     if (canRequestGrowth) {
-      const chance = constrain(0.28 + strength * 0.48, 0.28, 0.82);
+      const chance = timedGrowth || shouldCatchUp ? 1 : constrain(0.3 + strength * 0.55, 0.3, 0.88);
       if (random() < chance) {
         this.requests.push({ ...this.snapshot });
         this.lastBuildFrame = frameCount;
@@ -182,6 +212,109 @@ class AudioMechanic {
     const pending = [...this.requests];
     this.requests.length = 0;
     return pending;
+  }
+
+  updatePhaseTiming(cityState, seconds) {
+    if (cityState.generationPhase === 'buildings' && this.buildPhaseStartSeconds === null) {
+      this.buildPhaseStartSeconds = seconds;
+      this.applyDynamicBuildTarget();
+    }
+  }
+
+  applyDynamicBuildTarget() {
+    if (!this.cityState) return;
+
+    if (!this.hasTrackDuration()) {
+      this.cityState.maxBuildings = max(this.cityState.buildings.length, this.defaultMaxBuildings);
+      return;
+    }
+
+    const durationTarget = this.getDurationBuildingTarget();
+    const capacityTarget = this.getCapacityBuildingTarget();
+    const target = floor(constrain(durationTarget, this.minDynamicBuildings, min(this.maxDynamicBuildings, capacityTarget)));
+    this.cityState.maxBuildings = max(this.cityState.buildings.length, target);
+  }
+
+  getDurationBuildingTarget() {
+    const seconds = this.audioDuration;
+    if (seconds < 75) return round(map(seconds, 30, 75, 42, 62));
+    if (seconds < 180) return round(map(seconds, 75, 180, 62, 96));
+    if (seconds < 360) return round(map(seconds, 180, 360, 96, 128));
+    return this.maxDynamicBuildings;
+  }
+
+  getCapacityBuildingTarget() {
+    const cityState = this.cityState;
+    if (!cityState) return this.defaultMaxBuildings;
+
+    if (cityState.developmentLots && cityState.developmentLots.length > 0) {
+      return floor(constrain(cityState.developmentLots.length * 0.72, this.minDynamicBuildings, this.maxDynamicBuildings));
+    }
+
+    const gridCells = cityState.gridColumns * cityState.gridRows;
+    const reservedCells = max(cityState.plannedStreetTarget || 0, cityState.roadTiles ? cityState.roadTiles.size : 0);
+    const estimatedBuildableCells = max(this.minDynamicBuildings, gridCells - reservedCells);
+    return floor(constrain(estimatedBuildableCells * 0.28, this.minDynamicBuildings, this.maxDynamicBuildings));
+  }
+
+  getRequestIntervalFrames(cityState) {
+    if (!this.hasTrackDuration()) {
+      return cityState.generationPhase === 'roads' ? 48 : this.minBuildFrames;
+    }
+
+    if (cityState.generationPhase === 'roads') {
+      const roadDeadline = this.getRoadDeadlineSeconds();
+      const remainingRoadTiles = max(1, cityState.plannedStreetTarget - cityState.roadTiles.size);
+      const expectedTilesPerRequest = 5.2;
+      const remainingRequests = max(1, ceil(remainingRoadTiles / expectedTilesPerRequest));
+      const remainingFrames = max(1, (roadDeadline - this.audioElement.currentTime) * 60);
+      return floor(constrain(remainingFrames / remainingRequests, 12, 54));
+    }
+
+    const remainingBuildings = max(1, cityState.maxBuildings - cityState.buildings.length);
+    const remainingFrames = max(1, (this.audioDuration - this.audioElement.currentTime) * 60);
+    return floor(constrain(remainingFrames / remainingBuildings, 14, 126));
+  }
+
+  getScheduleLag(cityState) {
+    if (!this.hasTrackDuration()) return 0;
+
+    if (cityState.generationPhase === 'roads') {
+      const roadProgress = cityState.plannedStreetTarget > 0 ? cityState.roadTiles.size / cityState.plannedStreetTarget : 1;
+      const targetRoadProgress = constrain(this.audioElement.currentTime / this.getRoadDeadlineSeconds(), 0, 1);
+      return targetRoadProgress - roadProgress;
+    }
+
+    const buildingProgress = cityState.maxBuildings > 0 ? cityState.buildings.length / cityState.maxBuildings : 1;
+    const targetBuildingProgress = this.getBuildingTargetProgress(cityState);
+    return targetBuildingProgress - buildingProgress;
+  }
+
+  getBuildingTargetProgress(cityState) {
+    if (!this.hasTrackDuration()) return 1;
+    if (cityState.generationPhase === 'roads') return 0;
+
+    const buildStart = this.buildPhaseStartSeconds ?? this.getRoadDeadlineSeconds();
+    const buildDuration = max(1, this.audioDuration - buildStart);
+    return constrain((this.audioElement.currentTime - buildStart) / buildDuration + 0.015, 0, 1);
+  }
+
+  getRoadDeadlineSeconds() {
+    if (!this.hasTrackDuration()) return 24;
+    return constrain(this.audioDuration * this.roadDurationRatio, 12, 45);
+  }
+
+  isNearTrackEnd(cityState) {
+    if (!this.hasTrackDuration()) return false;
+    return this.audioDuration - this.audioElement.currentTime < 10 && !this.isGenerationComplete(cityState);
+  }
+
+  isGenerationComplete(cityState) {
+    return cityState.generationPhase !== 'roads' && cityState.buildings.length >= cityState.maxBuildings;
+  }
+
+  hasTrackDuration() {
+    return Number.isFinite(this.audioDuration) && this.audioDuration > 0;
   }
 
   updateHud(cityState) {

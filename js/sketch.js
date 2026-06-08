@@ -109,7 +109,7 @@ function createDefaultCityState() {
     parkTiles: new Set(),
     pulseRings: [],
     nextBuildingId: 1,
-    maxBuildings: 105,
+    maxBuildings: 105, // Fallback only; audio duration updates this target after a track loads.
     selectedBuilding: null,
     hoveredBuilding: null,
     audioSnapshot: null,
@@ -626,7 +626,7 @@ function pickNextBuildCell(snapshot) {
 
   for (const anchor of getCandidateDevelopmentAnchors()) {
     if (!isBuildableCell(anchor.x, anchor.y)) continue;
-    const roadCell = anchor.roadCell || findNearestRoadCell(anchor.x, anchor.y, 3);
+    const roadCell = anchor.roadCell || findNearestRoadCell(anchor.x, anchor.y, getBuildRoadSearchDistance());
     if (!roadCell) continue;
 
     for (const footprint of getFootprintOptions(snapshot)) {
@@ -641,7 +641,7 @@ function pickNextBuildCell(snapshot) {
       const occupiedEdges = countFootprintOccupiedEdges(lot.x, lot.y, lot.width, lot.depth);
       const blockLoad = countBuildingsInBlock(lot.x, lot.y);
       const area = lot.width * lot.depth;
-      if (area > 1 && occupiedEdges > 0) continue;
+      if (area > 1 && occupiedEdges > 0 && !shouldRelaxBuildSpacing()) continue;
       if (occupiedEdges > getNeighbourPressureLimit(snapshot)) continue;
       if (blockLoad >= getBlockBuildingLimit(snapshot)) continue;
 
@@ -658,9 +658,14 @@ function pickNextBuildCell(snapshot) {
 
 function getCandidateDevelopmentAnchors() {
   if (cityState.developmentLots.length > 0) {
-    return cityState.developmentLots;
+    if (!shouldRelaxBuildSpacing()) return cityState.developmentLots;
+    return [...cityState.developmentLots, ...getRoadDevelopmentAnchors()];
   }
 
+  return getRoadDevelopmentAnchors();
+}
+
+function getRoadDevelopmentAnchors() {
   const anchors = [];
   for (const key of cityState.roadTiles) {
     const roadCell = parseCellKey(key);
@@ -676,16 +681,18 @@ function getNeighbourPressureLimit(snapshot) {
 }
 
 function getBlockBuildingLimit(snapshot) {
-  if (snapshot.dominant === 'bass') return 4;
-  if (snapshot.dominant === 'treble') return 2;
-  return 3;
+  const lateCityBonus = shouldRelaxBuildSpacing() ? 2 : 0;
+  if (snapshot.dominant === 'bass') return 6 + lateCityBonus;
+  if (snapshot.dominant === 'treble') return 4 + lateCityBonus;
+  return 5 + lateCityBonus;
 }
 
 function getBuildAnchorsFromRoad(roadCell) {
   const anchors = [];
+  const maxSetback = shouldRelaxBuildSpacing() ? 3 : 2;
 
   for (const direction of getCardinalDirections()) {
-    for (let setback = 0; setback <= 2; setback++) {
+    for (let setback = 0; setback <= maxSetback; setback++) {
       const x = roadCell.x + direction.dx * (setback + 1);
       const y = roadCell.y + direction.dy * (setback + 1);
       if (!isInBounds(x, y) || isRoadCell(x, y) || isPlannedStreetCorridor(x, y)) break;
@@ -694,6 +701,14 @@ function getBuildAnchorsFromRoad(roadCell) {
   }
 
   return anchors;
+}
+
+function shouldRelaxBuildSpacing() {
+  return cityState.lotsExhausted || cityState.buildings.length >= cityState.maxBuildings * 0.65;
+}
+
+function getBuildRoadSearchDistance() {
+  return shouldRelaxBuildSpacing() ? 4 : 3;
 }
 
 function getSetbackScore(anchor) {
