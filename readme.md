@@ -22,7 +22,7 @@ The main canvas is drawn in `js/sketch.js`. The function `isoToScreen()` convert
 
 ### Audio analysis
 
-The audio mechanic is in `js/audio-mechanic.js`. It follows the Week 12 p5.sound approach by using `loadSound()` to load a selected audio file, `p5.Amplitude` to read overall loudness, and `p5.FFT` to separate the sound into bass, mid, and treble ranges. These values affect the growth rhythm, the dominant band saved into each building, roof accent marks, and the information shown in the archive panel.
+The audio mechanic is in `js/audio-mechanic.js`. It uses the browser Web Audio API and `AnalyserNode` to read frequency data from the selected audio file. The code separates the sound into bass, mid, and treble ranges. These values affect the growth rhythm, the dominant band saved into each building, roof accent marks, and the information shown in the archive panel.
 
 ### Audio-paced generation
 
@@ -41,15 +41,6 @@ The time mechanic is in `js/time-mechanic.js`. It runs a slow day-night cycle. T
 ### User input
 
 The input mechanic is in `js/input-mechanic.js`. The user can hover over a building to highlight it and click a building to open its archive. The archive shows the sound and generation data connected to that building.
-
-## Outside Course Techniques
-
-Some techniques may go beyond the weekly class examples, so their sources and principles are listed here.
-
-- **p5.sound frequency analysis:** The audio mechanic follows the Week 12 sound lecture. `loadSound()` loads the selected audio file, `p5.Amplitude` returns a loudness value between 0 and 1, and `p5.FFT` divides the sound into frequency data. The project maps this data into bass, mid, and treble values, then uses those values to pace street and building generation.
-- **Isometric projection:** The city is drawn with a custom 2.5D projection rather than a 3D engine. `isoToScreen()` maps each grid cell with `(x - y)` for horizontal placement, `(x + y)` for vertical placement, and subtracts building height from the y position. Buildings are sorted from back to front before drawing so nearer buildings cover farther ones.
-- **p5.js noise and random values:** Random values create variation, while `noise()` keeps nearby height values smoother and more organic. Combining them stops the city from looking either too uniform or completely chaotic.
-- **Colour and vector interpolation:** `lerpColor()` blends between day, sunset, and night colours. `p5.Vector.lerp()` finds points along building edges, which helps draw windows, roof details, and facade lines accurately on isometric faces.
 
 ## Mechanic Ownership
 
@@ -100,14 +91,8 @@ ChatGPT/Codex was used to help with planning, debugging, README drafting, and pa
 ## External References
 
 - [p5.js](https://p5js.org/) was used for canvas drawing, animation, colour, interaction, noise, and random values.
-- [p5.js reference: noise()](https://p5js.org/reference/p5/noise/) explains smooth noise values, used here for varied but coherent building heights.
-- [p5.js reference: random()](https://p5js.org/reference/p5/random/) explains random number selection, used here for height variation, street spacing, park placement, and generated detail.
-- [p5.js reference: lerpColor()](https://p5js.org/reference/p5/lerpColor/) explains colour interpolation, used here for the day-night cycle and time-based colour tinting.
-- [p5.js reference: p5.Vector.lerp()](https://p5js.org/reference/p5.Vector/lerp/) explains vector interpolation, used here to place windows and details along isometric building faces.
-- [p5.js reference: loadSound()](https://p5js.org/reference/p5/loadSound/) explains loading audio files into a p5 sketch.
-- [p5.js reference: p5.Amplitude](https://p5js.org/reference/p5.Amplitude/) explains overall loudness analysis, used here for the audio level stored in each building record.
-- [p5.js reference: p5.FFT](https://p5js.org/reference/p5.FFT/) explains frequency analysis, used here for bass, mid, and treble data.
-- `assets/reference-isometric-city.jpg` is a team-supplied visual style reference for the clean isometric city look.
+- [MDN Web Docs: AnalyserNode](https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode) was used as a reference for browser-based frequency analysis.
+- `assets/reference-isometric-city.jpg` is our visual style reference for the clean isometric city look.
 
 ## Notes
 
