@@ -12,6 +12,8 @@ Our visual reference is an architectural isometric city drawing. We liked its cl
 
 The main idea is to treat music as a city plan. Instead of using sound only as a decorative visual effect, the track becomes the rule that controls when the city grows and what kind of data each building stores.
 
+![Project interface screenshot](assets/project-screenshot.png)
+
 ## Techniques
 
 ### p5.js isometric drawing
@@ -25,6 +27,8 @@ The audio mechanic is in `js/audio-mechanic.js`. It uses the browser Web Audio A
 ### Audio-paced generation
 
 When a track is loaded, the project reads its duration and adjusts the target number of buildings. This helps a short track create a smaller city and a longer track create a larger one. The goal is for the city to keep growing through most of the song instead of finishing too early.
+
+The interface also shows the current track position and city growth stage. The city progress label changes from street planning to building construction, and the small band legend explains how bass, mid, and treble influence the generated city.
 
 ### Randomness and noise
 
@@ -67,6 +71,7 @@ Some sample music files are included in `assets/music/`, but the project also wo
 ├── style.css
 ├── readme.md
 ├── assets/
+│   ├── project-screenshot.png
 │   ├── reference-isometric-city.jpg
 │   └── music/
 └── js/

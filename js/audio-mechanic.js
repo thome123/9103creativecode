@@ -372,7 +372,7 @@ class AudioMechanic {
 
     if (cityState.generationPhase === 'roads') {
       this.setProgressWidth(this.cityProgressFill, roadProgress * 25);
-      this.cityProgressText.textContent = `Roads ${cityState.roadTiles.size}/${cityState.plannedStreetTarget || 0}`;
+      this.cityProgressText.textContent = `Planning streets ${cityState.roadTiles.size}/${cityState.plannedStreetTarget || 0}`;
       return;
     }
 
@@ -382,7 +382,7 @@ class AudioMechanic {
     const fullLabel = cityState.lotsExhausted ? ' lots full' : '';
 
     this.setProgressWidth(this.cityProgressFill, fullCityProgress);
-    this.cityProgressText.textContent = `Buildings ${cityState.buildings.length}/${cityState.maxBuildings}${fullLabel}`;
+    this.cityProgressText.textContent = `Constructing buildings ${cityState.buildings.length}/${cityState.maxBuildings}${fullLabel}`;
   }
 
   setProgressWidth(element, percent) {
