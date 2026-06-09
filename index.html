@@ -22,7 +22,7 @@
           <h1>Isometric City Generator</h1>
         </div>
         <p class="intro">Sound draws the street plan first. Later beats develop buildings inside the generated blocks.</p>
-        <p id="cityStats" class="city-meter">Buildings: 0</p>
+        <p id="cityStats" class="city-meter">Time: Morning</p>
       </header>
 
       <div class="audio-dock">
@@ -33,6 +33,26 @@
           <button id="clearCity" type="button">Clear City</button>
         </div>
         <p id="audioStatus" class="audio-status">No audio loaded.</p>
+        <div class="progress-panel" aria-label="Audio and city generation progress">
+          <div class="progress-row">
+            <div class="progress-copy">
+              <span>Track Progress</span>
+              <strong id="trackProgressText">00:00 / 00:00</strong>
+            </div>
+            <div class="progress-track" role="progressbar" aria-label="Track progress">
+              <span id="trackProgressFill"></span>
+            </div>
+          </div>
+          <div class="progress-row">
+            <div class="progress-copy">
+              <span>City Growth</span>
+              <strong id="cityProgressText">Waiting for audio</strong>
+            </div>
+            <div class="progress-track progress-track-city" role="progressbar" aria-label="City generation progress">
+              <span id="cityProgressFill"></span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 

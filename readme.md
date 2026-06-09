@@ -2,6 +2,8 @@
 
 This is an original p5.js project that uses music to build a 2.5D isometric city. The city starts as an empty planning map. When an audio track plays, the road network appears first, then buildings are generated inside the blocks. Each building keeps a small record of the sound moment that created it, including the timestamp, audio level, dominant frequency band, and random seed.
 
+Our team chose **Option 2: create an original interactive visual work from scratch**.
+
 ## Inspiration
 
 Our visual reference is an architectural isometric city drawing. We liked its clean linework, pale background, cyan-green roofs, simple building forms, and quiet map-like feeling. We used this image as a style guide rather than a layout to copy.

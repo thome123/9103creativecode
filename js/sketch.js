@@ -621,6 +621,7 @@ function maybeGenerateParkTile(snapshot) {
   cityState.parkTiles.add(cellKey(candidate.x, candidate.y));
 }
 
+// AI-assisted: scores legal building lots by road access, spacing, footprint size, block density, and centre distance.
 function pickNextBuildCell(snapshot) {
   const candidates = [];
 
@@ -959,6 +960,7 @@ function isParkCell(x, y) {
   return cityState.parkTiles.has(cellKey(x, y));
 }
 
+// AI-assisted: converts square grid coordinates into 2.5D isometric screen coordinates.
 function isoToScreen(gridX, gridY, z = 0) {
   return createVector(
     cityState.originX + (gridX - gridY) * cityState.tileW * 0.5,
@@ -1137,6 +1139,7 @@ function drawBuildings() {
   }
 }
 
+// AI-assisted: sorts isometric buildings from back to front so closer buildings cover farther ones correctly.
 function compareBuildingsForIsoDraw(a, b) {
   const aDepth = getBuildingBaseDepth(a);
   const bDepth = getBuildingBaseDepth(b);
@@ -1278,6 +1281,7 @@ function drawWindows(building, topA, topB, bottomB, bottomA, face) {
   drawWindowLights(building, topA, topB, bottomB, bottomA, face, floors, divisions);
 }
 
+// AI-assisted: uses deterministic seeds so window lights flicker with music but stay attached to each building.
 function drawWindowLights(building, topA, topB, bottomB, bottomA, face, floors, divisions) {
   const nightAmount = timeMechanic.getWindowLightAmount(cityState);
   const musicGlow = cityState.audioSnapshot ? cityState.audioSnapshot.level : 0;

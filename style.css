@@ -244,6 +244,63 @@ button:disabled {
   line-height: 1.45;
 }
 
+.progress-panel {
+  display: grid;
+  gap: 13px;
+  padding: 13px;
+  background: rgba(237, 232, 220, 0.46);
+  border: 1px solid rgba(167, 173, 164, 0.42);
+}
+
+.progress-row {
+  display: grid;
+  gap: 7px;
+}
+
+.progress-copy {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.progress-copy strong {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  position: relative;
+  height: 7px;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, rgba(31, 45, 43, 0.08) 1px, transparent 1px),
+    rgba(255, 253, 246, 0.72);
+  background-size: 12px 100%, auto;
+  border: 1px solid rgba(31, 45, 43, 0.18);
+}
+
+.progress-track span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: linear-gradient(90deg, var(--teal-dark), var(--teal));
+  transition: width 180ms linear;
+}
+
+.progress-track-city span {
+  background: linear-gradient(90deg, var(--sand), #d6c17c);
+}
+
 .building-info {
   top: 22px;
   right: 22px;
@@ -341,9 +398,24 @@ button:disabled {
   .left-panel {
     top: 12px;
     display: block;
-    max-height: 54vh;
+    max-height: 72vh;
     padding: 16px;
     overflow: auto;
+  }
+
+  .controls {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  button {
+    padding: 9px 6px;
+    font-size: 10px;
+  }
+
+  .progress-panel {
+    gap: 9px;
+    padding: 10px;
   }
 
   .audio-dock {
@@ -356,7 +428,7 @@ button:disabled {
 
   .building-info {
     bottom: 12px;
-    max-height: 30vh;
+    max-height: 23vh;
     padding: 16px;
   }
 

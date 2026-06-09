@@ -23,6 +23,7 @@ class TimeMechanic {
     return 'Night';
   }
 
+  // AI-assisted: blends morning, day, sunset, and night colours into a continuous background gradient.
   getSkyColour(cityState, verticalPosition) {
     const p = cityState.timeOfDay;
     const morning = color('#f7ead8');
@@ -45,6 +46,7 @@ class TimeMechanic {
     return lerpColor(base, deepNight, verticalPosition * (0.14 + this.getNightAmount(cityState) * 0.32));
   }
 
+  // AI-assisted: tints building colours according to time of day while keeping the architectural palette readable.
   tintBuildingColour(hexColour, cityState, brightnessBoost = 1) {
     const base = color(hexColour);
     const p = cityState.timeOfDay;
@@ -71,6 +73,7 @@ class TimeMechanic {
     return map(p, 0.9, 1, 1, 0.38);
   }
 
+  // AI-assisted: changes shadow direction and strength across the day-night cycle.
   getShadowProfile(cityState) {
     const p = cityState.timeOfDay;
     const nightAmount = this.getNightAmount(cityState);

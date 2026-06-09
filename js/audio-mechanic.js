@@ -1,5 +1,7 @@
 // Audio mechanic generated with help from ChatGPT/Codex.
 // It uses the Web Audio API AnalyserNode to extract level/frequency data from an uploaded track.
+// Frequency analysis follows the MDN Web Audio API AnalyserNode reference:
+// https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode
 class AudioMechanic {
   constructor() {
     this.audioElement = null;
@@ -34,6 +36,10 @@ class AudioMechanic {
     this.clearCity = document.getElementById('clearCity');
     this.audioInput = document.getElementById('audioInput');
     this.audioElement = document.getElementById('audioPlayer');
+    this.trackProgressFill = document.getElementById('trackProgressFill');
+    this.trackProgressText = document.getElementById('trackProgressText');
+    this.cityProgressFill = document.getElementById('cityProgressFill');
+    this.cityProgressText = document.getElementById('cityProgressText');
     this.AudioContextClass = window.AudioContext || window.webkitAudioContext;
     this.resetCity = resetCity;
 
@@ -76,6 +82,7 @@ class AudioMechanic {
     this.playPause.disabled = false;
     this.playPause.textContent = 'Play';
     this.status.textContent = `Loaded: ${file.name}`;
+    this.updateProgressDisplay(this.cityState);
   }
 
   async togglePlayback() {
@@ -109,6 +116,7 @@ class AudioMechanic {
 
     this.audioDuration = this.audioElement.duration;
     this.applyDynamicBuildTarget();
+    this.updateProgressDisplay(this.cityState);
     if (this.currentFileName) {
       this.status.textContent = `Loaded: ${this.currentFileName} (${this.formatTime(this.audioDuration)}) | Target: ${this.cityState.maxBuildings} buildings`;
     }
@@ -128,8 +136,10 @@ class AudioMechanic {
 
     this.playPause.textContent = 'Play';
     this.status.textContent = this.ready ? 'City cleared. Press Play to regenerate.' : 'City cleared.';
+    this.updateProgressDisplay(this.cityState);
   }
 
+  // AI-assisted: builds the browser audio graph so the uploaded track can be heard and analysed at the same time.
   async ensureAudioContext() {
     if (!this.audioContext) {
       this.audioContext = new this.AudioContextClass();
@@ -147,6 +157,7 @@ class AudioMechanic {
     }
   }
 
+  // AI-assisted: converts raw frequency bins into a compact audio snapshot used by the city generator.
   update(cityState) {
     if (!this.ready || !this.analyser || this.audioElement.paused) {
       this.snapshot = this.emptySnapshot();
@@ -221,6 +232,7 @@ class AudioMechanic {
     }
   }
 
+  // AI-assisted: balances track duration with available map capacity so long songs can grow larger cities.
   applyDynamicBuildTarget() {
     if (!this.cityState) return;
 
@@ -257,6 +269,7 @@ class AudioMechanic {
     return floor(constrain(estimatedBuildableCells * 0.28, this.minDynamicBuildings, this.maxDynamicBuildings));
   }
 
+  // AI-assisted: calculates how often growth requests should happen so generation follows the music timeline.
   getRequestIntervalFrames(cityState) {
     if (!this.hasTrackDuration()) {
       return cityState.generationPhase === 'roads' ? 48 : this.minBuildFrames;
@@ -276,6 +289,7 @@ class AudioMechanic {
     return floor(constrain(remainingFrames / remainingBuildings, 14, 126));
   }
 
+  // AI-assisted: compares expected progress with real city progress and triggers catch-up growth when needed.
   getScheduleLag(cityState) {
     if (!this.hasTrackDuration()) return 0;
 
@@ -318,6 +332,7 @@ class AudioMechanic {
   }
 
   updateHud(cityState) {
+    this.updateProgressDisplay(cityState);
     if (!this.stats) return;
     const label = cityState.timeLabel || 'Day';
     const audioLabel =
@@ -326,11 +341,54 @@ class AudioMechanic {
         : '';
 
     if (cityState.generationPhase === 'roads') {
-      this.stats.textContent = `Streets: ${cityState.roadTiles.size}/${cityState.plannedStreetTarget} | Time: ${label}${audioLabel}`;
+      this.stats.textContent = `Time: ${label}${audioLabel}`;
       return;
     }
     const capacityLabel = cityState.lotsExhausted ? ' | Lots full' : '';
-    this.stats.textContent = `Buildings: ${cityState.buildings.length}/${cityState.maxBuildings} | Blocks: ${cityState.developmentLots.length} | Time: ${label}${audioLabel}${capacityLabel}`;
+    this.stats.textContent = `Time: ${label}${audioLabel}${capacityLabel}`;
+  }
+
+  updateProgressDisplay(cityState) {
+    this.updateTrackProgress();
+    this.updateCityProgress(cityState);
+  }
+
+  updateTrackProgress() {
+    if (!this.trackProgressFill || !this.trackProgressText) return;
+
+    const currentSeconds = this.audioElement ? this.audioElement.currentTime || 0 : 0;
+    const durationSeconds = this.hasTrackDuration() ? this.audioDuration : 0;
+    const percent = durationSeconds > 0 ? (currentSeconds / durationSeconds) * 100 : 0;
+
+    this.setProgressWidth(this.trackProgressFill, percent);
+    this.trackProgressText.textContent = `${this.formatTime(currentSeconds)} / ${this.formatTime(durationSeconds)}`;
+  }
+
+  updateCityProgress(cityState) {
+    if (!this.cityProgressFill || !this.cityProgressText || !cityState) return;
+
+    const roadTarget = Math.max(1, cityState.plannedStreetTarget || 1);
+    const roadProgress = Math.min(1, cityState.roadTiles.size / roadTarget);
+
+    if (cityState.generationPhase === 'roads') {
+      this.setProgressWidth(this.cityProgressFill, roadProgress * 25);
+      this.cityProgressText.textContent = `Roads ${cityState.roadTiles.size}/${cityState.plannedStreetTarget || 0}`;
+      return;
+    }
+
+    const buildingTarget = Math.max(1, cityState.maxBuildings || 1);
+    const buildingProgress = Math.min(1, cityState.buildings.length / buildingTarget);
+    const fullCityProgress = 25 + buildingProgress * 75;
+    const fullLabel = cityState.lotsExhausted ? ' lots full' : '';
+
+    this.setProgressWidth(this.cityProgressFill, fullCityProgress);
+    this.cityProgressText.textContent = `Buildings ${cityState.buildings.length}/${cityState.maxBuildings}${fullLabel}`;
+  }
+
+  setProgressWidth(element, percent) {
+    const safePercent = Math.max(0, Math.min(100, percent));
+    element.style.width = `${safePercent.toFixed(1)}%`;
+    element.parentElement?.setAttribute('aria-valuenow', safePercent.toFixed(0));
   }
 
   emptySnapshot() {
