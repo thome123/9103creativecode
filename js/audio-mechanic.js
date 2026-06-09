@@ -1,14 +1,26 @@
 // Audio mechanic generated with help from ChatGPT/Codex.
-// It uses the Web Audio API AnalyserNode to extract level/frequency data from an uploaded track.
-// Frequency analysis follows the MDN Web Audio API AnalyserNode reference:
-// https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode
+// It uses p5.sound to extract level/frequency data from an uploaded track.
+// Frequency analysis follows the p5.FFT and p5.Amplitude references:
+// https://p5js.org/reference/p5.FFT/
+// https://p5js.org/reference/p5.Amplitude/
+// Principle: p5.FFT separates music into frequency bands, while p5.Amplitude reads overall loudness.
+// p5.sound is loaded here so this mechanic can follow the Week 12 p5 sound workflow
+// without changing index.html or the other mechanic files.
+if (typeof p5 !== 'undefined' && !(p5.FFT && p5.Amplitude && typeof loadSound === 'function')) {
+  document.write('<script src="https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/addons/p5.sound.min.js"><\\/script>');
+}
+
 class AudioMechanic {
+  // Store all audio, UI, and generation pacing state inside one mechanic object.
+  // This keeps the audio responsibility separate from the shared sketch renderer.
   constructor() {
-    this.audioElement = null;
-    this.audioContext = null;
-    this.analyser = null;
-    this.sourceNode = null;
-    this.frequencyData = null;
+    this.soundFile = null;
+    this.soundUrl = '';
+    this.fft = null;
+    this.amplitude = null;
+    this.p5SoundPromise = null;
+    this.p5SoundReady = false;
+    this.loadingSound = false;
     this.ready = false;
     this.requests = [];
     this.lastBuildFrame = 0;
@@ -27,6 +39,8 @@ class AudioMechanic {
     this.resetCity = null;
   }
 
+  // Connect the audio mechanic to the shared city state and to the HTML controls.
+  // The sketch passes in resetCity so the audio file can restart the generated map cleanly.
   setup(cityState, resetCity) {
     this.cityState = cityState;
     this.status = document.getElementById('audioStatus');
@@ -35,75 +49,122 @@ class AudioMechanic {
     this.playPause = document.getElementById('playPause');
     this.clearCity = document.getElementById('clearCity');
     this.audioInput = document.getElementById('audioInput');
-    this.audioElement = document.getElementById('audioPlayer');
     this.trackProgressFill = document.getElementById('trackProgressFill');
     this.trackProgressText = document.getElementById('trackProgressText');
     this.cityProgressFill = document.getElementById('cityProgressFill');
     this.cityProgressText = document.getElementById('cityProgressText');
-    this.AudioContextClass = window.AudioContext || window.webkitAudioContext;
     this.resetCity = resetCity;
 
-    if (!this.audioElement || !this.AudioContextClass) {
-      this.status.textContent = 'This browser does not support the required audio analyser.';
+    if (typeof p5 === 'undefined') {
+      this.status.textContent = 'p5.js is required before the audio mechanic can run.';
       this.chooseAudio.disabled = true;
       return;
     }
+
+    this.chooseAudio.disabled = true;
+    this.status.textContent = 'Loading p5.sound...';
+    this.ensureP5SoundLibrary()
+      .then(() => {
+        this.chooseAudio.disabled = false;
+        this.status.textContent = 'No audio loaded.';
+      })
+      .catch(() => {
+        this.status.textContent = 'p5.sound could not be loaded. Check the internet connection.';
+        this.chooseAudio.disabled = true;
+      });
 
     this.chooseAudio.addEventListener('click', () => this.audioInput.click());
     this.audioInput.addEventListener('change', (event) => this.loadAudio(event));
     this.playPause.addEventListener('click', async () => this.togglePlayback());
     this.clearCity.addEventListener('click', () => this.clearGeneratedCity());
-    this.audioElement.addEventListener('loadedmetadata', () => this.updateAudioDuration());
-    this.audioElement.addEventListener('ended', () => {
-      this.playPause.textContent = 'Play';
-      this.status.textContent = 'Audio ended.';
-    });
   }
 
-  loadAudio(event) {
+  // Load a local audio file selected by the user.
+  // URL.createObjectURL() lets the browser play the file without uploading it anywhere.
+  async loadAudio(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
 
-    if (this.audioElement.src) {
-      URL.revokeObjectURL(this.audioElement.src);
+    try {
+      await this.ensureP5SoundLibrary();
+    } catch (error) {
+      this.status.textContent = 'p5.sound could not be loaded. Try again with internet access.';
+      return;
     }
 
-    this.audioElement.pause();
+    if (this.soundFile) {
+      this.soundFile.stop();
+    }
+    if (this.soundUrl) {
+      URL.revokeObjectURL(this.soundUrl);
+    }
+
     this.resetGenerationState();
     this.audioDuration = 0;
     this.currentFileName = file.name;
+    this.ready = false;
+    this.loadingSound = true;
+    this.playPause.disabled = true;
+    this.playPause.textContent = 'Play';
+    this.status.textContent = `Loading: ${file.name}`;
     if (typeof this.resetCity === 'function') {
       this.resetCity();
     }
 
-    this.audioElement.src = URL.createObjectURL(file);
-    this.audioElement.load();
-    this.ready = true;
-    this.playPause.disabled = false;
-    this.playPause.textContent = 'Play';
-    this.status.textContent = `Loaded: ${file.name}`;
+    this.soundUrl = URL.createObjectURL(file);
+    this.soundFile = loadSound(
+      this.soundUrl,
+      (loadedSound) => {
+        this.soundFile = loadedSound || this.soundFile;
+        this.loadingSound = false;
+        this.ready = true;
+        this.configureP5Analyzers();
+        this.updateAudioDuration();
+        this.playPause.disabled = false;
+        this.playPause.textContent = 'Play';
+        if (this.soundFile && typeof this.soundFile.onended === 'function') {
+          this.soundFile.onended(() => {
+            this.playPause.textContent = 'Play';
+            this.status.textContent = 'Audio ended.';
+          });
+        }
+      },
+      () => {
+        this.loadingSound = false;
+        this.ready = false;
+        this.playPause.disabled = true;
+        this.status.textContent = 'Audio failed to load. Try another file.';
+      },
+    );
     this.updateProgressDisplay(this.cityState);
   }
 
+  // Start or pause playback. Browsers require this to happen after a user action,
+  // so the audio context is created only when the user presses Play.
   async togglePlayback() {
-    if (!this.ready || !this.audioElement.src) return;
-    await this.ensureAudioContext();
+    if (!this.ready || this.loadingSound || !this.soundFile) return;
+    await this.ensureP5Audio();
 
-    if (this.audioElement.paused) {
+    if (!this.soundFile.isPlaying()) {
       try {
-        await this.audioElement.play();
+        if (this.hasTrackDuration() && this.getCurrentTime() >= this.audioDuration - 0.05) {
+          this.soundFile.stop();
+        }
+        this.soundFile.play();
         this.playPause.textContent = 'Pause';
         this.status.textContent = 'Audio is generating the city.';
       } catch (error) {
         this.status.textContent = 'Playback failed. Try another audio file.';
       }
     } else {
-      this.audioElement.pause();
+      this.soundFile.pause();
       this.playPause.textContent = 'Play';
       this.status.textContent = 'Audio paused.';
     }
   }
 
+  // Clear queued generation requests and return the audio analysis snapshot to silence.
+  // This is used both when a new file loads and when the city is manually cleared.
   resetGenerationState() {
     this.requests.length = 0;
     this.lastBuildFrame = 0;
@@ -111,10 +172,13 @@ class AudioMechanic {
     this.snapshot = this.emptySnapshot();
   }
 
+  // Once metadata is available, read the track duration and resize the city target.
+  // This prevents a short track and a long track from generating the same amount of city.
   updateAudioDuration() {
-    if (!Number.isFinite(this.audioElement.duration)) return;
+    if (!this.soundFile || typeof this.soundFile.duration !== 'function') return;
 
-    this.audioDuration = this.audioElement.duration;
+    this.audioDuration = this.soundFile.duration();
+    if (!Number.isFinite(this.audioDuration)) return;
     this.applyDynamicBuildTarget();
     this.updateProgressDisplay(this.cityState);
     if (this.currentFileName) {
@@ -122,10 +186,11 @@ class AudioMechanic {
     }
   }
 
+  // Reset the visual city while keeping the currently selected audio file available.
+  // This lets the viewer replay the same track and watch the city grow again.
   clearGeneratedCity() {
-    if (this.audioElement) {
-      this.audioElement.pause();
-      this.audioElement.currentTime = 0;
+    if (this.soundFile) {
+      this.soundFile.stop();
     }
 
     this.resetGenerationState();
@@ -139,38 +204,97 @@ class AudioMechanic {
     this.updateProgressDisplay(this.cityState);
   }
 
-  // AI-assisted: builds the browser audio graph so the uploaded track can be heard and analysed at the same time.
-  async ensureAudioContext() {
-    if (!this.audioContext) {
-      this.audioContext = new this.AudioContextClass();
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 1024;
-      this.analyser.smoothingTimeConstant = 0.82;
-      this.sourceNode = this.audioContext.createMediaElementSource(this.audioElement);
-      this.sourceNode.connect(this.analyser);
-      this.analyser.connect(this.audioContext.destination);
-      this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+  // Load the p5.sound addon without changing index.html.
+  // This keeps the project structure stable while still using the Week 12 p5.sound workflow.
+  ensureP5SoundLibrary() {
+    if (this.hasP5Sound()) {
+      this.p5SoundReady = true;
+      return Promise.resolve();
     }
 
-    if (this.audioContext.state === 'suspended') {
-      await this.audioContext.resume();
+    if (this.p5SoundPromise) return this.p5SoundPromise;
+
+    this.p5SoundPromise = new Promise((resolve, reject) => {
+      const existingScript = document.querySelector('script[data-p5-sound="true"]');
+      if (existingScript) {
+        existingScript.addEventListener('load', () => {
+          if (this.hasP5Sound()) {
+            this.p5SoundReady = true;
+            resolve();
+          } else {
+            reject(new Error('p5.sound script loaded without expected globals.'));
+          }
+        });
+        existingScript.addEventListener('error', reject);
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/addons/p5.sound.min.js';
+      script.async = true;
+      script.dataset.p5Sound = 'true';
+      script.addEventListener('load', () => {
+        setTimeout(() => {
+          if (this.hasP5Sound()) {
+            this.p5SoundReady = true;
+            resolve();
+          } else {
+            reject(new Error('p5.sound loaded but did not expose p5.FFT/loadSound.'));
+          }
+        }, 0);
+      });
+      script.addEventListener('error', reject);
+      document.head.appendChild(script);
+    });
+
+    return this.p5SoundPromise;
+  }
+
+  // Check for the p5.sound features used in this mechanic.
+  // This mirrors the Week 12 tools: loadSound(), p5.FFT, and p5.Amplitude.
+  hasP5Sound() {
+    return typeof p5 !== 'undefined' && p5.FFT && p5.Amplitude && typeof loadSound === 'function';
+  }
+
+  // Create the p5.FFT and p5.Amplitude objects used in the Week 12 audio lecture.
+  // FFT reads frequency bands; Amplitude reads the overall loudness level.
+  configureP5Analyzers() {
+    if (!this.soundFile || !this.p5SoundReady || !this.hasP5Sound()) return;
+
+    this.fft = new p5.FFT(0.82, 256);
+    this.amplitude = new p5.Amplitude(0.82);
+    this.fft.setInput(this.soundFile);
+    this.amplitude.setInput(this.soundFile);
+  }
+
+  // Start the p5 audio context after a user gesture, matching browser autoplay rules from Week 12.
+  async ensureP5Audio() {
+    await this.ensureP5SoundLibrary();
+    if (typeof userStartAudio === 'function') {
+      await userStartAudio();
+    }
+
+    if (!this.fft || !this.amplitude) {
+      this.configureP5Analyzers();
     }
   }
 
   // AI-assisted: converts raw frequency bins into a compact audio snapshot used by the city generator.
+  // The snapshot is the bridge between sound and visuals: it records level, bass, mid,
+  // treble, timestamp, and dominant band for the next street or building event.
   update(cityState) {
-    if (!this.ready || !this.analyser || this.audioElement.paused) {
+    if (!this.ready || !this.soundFile || !this.fft || !this.amplitude || !this.soundFile.isPlaying()) {
       this.snapshot = this.emptySnapshot();
       cityState.audioSnapshot = this.snapshot;
       return;
     }
 
-    this.analyser.getByteFrequencyData(this.frequencyData);
-    const level = this.averageRange(0, this.frequencyData.length) / 255;
-    const bass = this.averageRange(2, 24);
-    const mid = this.averageRange(24, 120);
-    const treble = this.averageRange(120, 260);
-    const seconds = this.audioElement.currentTime;
+    this.fft.analyze();
+    const level = this.amplitude.getLevel();
+    const bass = this.fft.getEnergy('bass');
+    const mid = this.fft.getEnergy('mid');
+    const treble = this.fft.getEnergy('treble');
+    const seconds = this.getCurrentTime();
     const strength = constrain(level * 1.8 + (bass + mid + treble) / 900, 0, 1.4);
     this.updatePhaseTiming(cityState, seconds);
 
@@ -207,24 +331,16 @@ class AudioMechanic {
     }
   }
 
-  averageRange(start, end) {
-    if (!this.frequencyData) return 0;
-    let total = 0;
-    let count = 0;
-    const safeEnd = min(end, this.frequencyData.length);
-    for (let i = start; i < safeEnd; i++) {
-      total += this.frequencyData[i];
-      count += 1;
-    }
-    return count ? total / count : 0;
-  }
-
+  // Give the shared sketch any build requests created during update().
+  // The sketch consumes these requests so audio controls timing but does not draw buildings directly.
   consumeBuildRequests() {
     const pending = [...this.requests];
     this.requests.length = 0;
     return pending;
   }
 
+  // Remember when the project changes from street planning to building construction.
+  // The remaining audio duration is then used to pace the building phase.
   updatePhaseTiming(cityState, seconds) {
     if (cityState.generationPhase === 'buildings' && this.buildPhaseStartSeconds === null) {
       this.buildPhaseStartSeconds = seconds;
@@ -247,6 +363,8 @@ class AudioMechanic {
     this.cityState.maxBuildings = max(this.cityState.buildings.length, target);
   }
 
+  // Convert track length into an approximate city size.
+  // Longer music can support a larger city because there is more time for generation.
   getDurationBuildingTarget() {
     const seconds = this.audioDuration;
     if (seconds < 75) return round(map(seconds, 30, 75, 42, 62));
@@ -255,6 +373,8 @@ class AudioMechanic {
     return this.maxDynamicBuildings;
   }
 
+  // Estimate the maximum useful building count based on available planned lots.
+  // This keeps the target realistic instead of asking the city to build in blocked spaces.
   getCapacityBuildingTarget() {
     const cityState = this.cityState;
     if (!cityState) return this.defaultMaxBuildings;
@@ -280,12 +400,12 @@ class AudioMechanic {
       const remainingRoadTiles = max(1, cityState.plannedStreetTarget - cityState.roadTiles.size);
       const expectedTilesPerRequest = 5.2;
       const remainingRequests = max(1, ceil(remainingRoadTiles / expectedTilesPerRequest));
-      const remainingFrames = max(1, (roadDeadline - this.audioElement.currentTime) * 60);
+      const remainingFrames = max(1, (roadDeadline - this.getCurrentTime()) * 60);
       return floor(constrain(remainingFrames / remainingRequests, 12, 54));
     }
 
     const remainingBuildings = max(1, cityState.maxBuildings - cityState.buildings.length);
-    const remainingFrames = max(1, (this.audioDuration - this.audioElement.currentTime) * 60);
+    const remainingFrames = max(1, (this.audioDuration - this.getCurrentTime()) * 60);
     return floor(constrain(remainingFrames / remainingBuildings, 14, 126));
   }
 
@@ -295,7 +415,7 @@ class AudioMechanic {
 
     if (cityState.generationPhase === 'roads') {
       const roadProgress = cityState.plannedStreetTarget > 0 ? cityState.roadTiles.size / cityState.plannedStreetTarget : 1;
-      const targetRoadProgress = constrain(this.audioElement.currentTime / this.getRoadDeadlineSeconds(), 0, 1);
+      const targetRoadProgress = constrain(this.getCurrentTime() / this.getRoadDeadlineSeconds(), 0, 1);
       return targetRoadProgress - roadProgress;
     }
 
@@ -304,33 +424,47 @@ class AudioMechanic {
     return targetBuildingProgress - buildingProgress;
   }
 
+  // Expected building progress after the road phase.
+  // A small lead-in offset keeps generation from feeling like it starts too late.
   getBuildingTargetProgress(cityState) {
     if (!this.hasTrackDuration()) return 1;
     if (cityState.generationPhase === 'roads') return 0;
 
     const buildStart = this.buildPhaseStartSeconds ?? this.getRoadDeadlineSeconds();
     const buildDuration = max(1, this.audioDuration - buildStart);
-    return constrain((this.audioElement.currentTime - buildStart) / buildDuration + 0.015, 0, 1);
+    return constrain((this.getCurrentTime() - buildStart) / buildDuration + 0.015, 0, 1);
   }
 
+  // Roads are generated near the start of the track so the city has structure first.
+  // The cap avoids spending too much of a long song on streets only.
   getRoadDeadlineSeconds() {
     if (!this.hasTrackDuration()) return 24;
     return constrain(this.audioDuration * this.roadDurationRatio, 12, 45);
   }
 
+  // Near the end, generation becomes less selective so the city can finish with the music.
   isNearTrackEnd(cityState) {
     if (!this.hasTrackDuration()) return false;
-    return this.audioDuration - this.audioElement.currentTime < 10 && !this.isGenerationComplete(cityState);
+    return this.audioDuration - this.getCurrentTime() < 10 && !this.isGenerationComplete(cityState);
   }
 
+  // A complete city has finished road planning and reached its dynamic building target.
   isGenerationComplete(cityState) {
     return cityState.generationPhase !== 'roads' && cityState.buildings.length >= cityState.maxBuildings;
   }
 
+  // Audio duration is only trusted after p5.sound has loaded the SoundFile.
   hasTrackDuration() {
     return Number.isFinite(this.audioDuration) && this.audioDuration > 0;
   }
 
+  // Read the playback position from p5.SoundFile.
+  getCurrentTime() {
+    if (!this.soundFile || typeof this.soundFile.currentTime !== 'function') return 0;
+    return this.soundFile.currentTime();
+  }
+
+  // Update the small text readout beside the controls without changing the canvas.
   updateHud(cityState) {
     this.updateProgressDisplay(cityState);
     if (!this.stats) return;
@@ -348,15 +482,17 @@ class AudioMechanic {
     this.stats.textContent = `Time: ${label}${audioLabel}${capacityLabel}`;
   }
 
+  // Keep both progress bars in sync with the actual track and city state.
   updateProgressDisplay(cityState) {
     this.updateTrackProgress();
     this.updateCityProgress(cityState);
   }
 
+  // Track progress is purely time-based.
   updateTrackProgress() {
     if (!this.trackProgressFill || !this.trackProgressText) return;
 
-    const currentSeconds = this.audioElement ? this.audioElement.currentTime || 0 : 0;
+    const currentSeconds = this.getCurrentTime();
     const durationSeconds = this.hasTrackDuration() ? this.audioDuration : 0;
     const percent = durationSeconds > 0 ? (currentSeconds / durationSeconds) * 100 : 0;
 
@@ -364,6 +500,8 @@ class AudioMechanic {
     this.trackProgressText.textContent = `${this.formatTime(currentSeconds)} / ${this.formatTime(durationSeconds)}`;
   }
 
+  // City progress uses 25% of the bar for streets and 75% for buildings.
+  // This matches the intended sequence: plan the city first, then develop it.
   updateCityProgress(cityState) {
     if (!this.cityProgressFill || !this.cityProgressText || !cityState) return;
 
@@ -385,12 +523,14 @@ class AudioMechanic {
     this.cityProgressText.textContent = `Constructing buildings ${cityState.buildings.length}/${cityState.maxBuildings}${fullLabel}`;
   }
 
+  // Clamp a progress value before writing it to CSS and accessibility metadata.
   setProgressWidth(element, percent) {
     const safePercent = Math.max(0, Math.min(100, percent));
     element.style.width = `${safePercent.toFixed(1)}%`;
     element.parentElement?.setAttribute('aria-valuenow', safePercent.toFixed(0));
   }
 
+  // Default snapshot used when no audio is playing.
   emptySnapshot() {
     return {
       level: 0,
@@ -404,12 +544,15 @@ class AudioMechanic {
     };
   }
 
+  // Format seconds as MM:SS for the UI and for each building archive record.
   formatTime(seconds) {
     const mins = floor(seconds / 60);
     const secs = floor(seconds % 60);
     return `${nf(mins, 2)}:${nf(secs, 2)}`;
   }
 
+  // Weight the bands so mid and treble are not overwhelmed by bass-heavy music.
+  // The result becomes a readable label saved into each generated building.
   getDominantBand(bass, mid, treble) {
     const bassScore = bass * 0.85;
     const midScore = mid * 1.1;
