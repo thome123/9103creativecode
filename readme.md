@@ -22,7 +22,7 @@ The main canvas is drawn in `js/sketch.js`. The function `isoToScreen()` convert
 
 ### Audio analysis
 
-The audio mechanic is in `js/audio-mechanic.js`. It uses the browser Web Audio API and `AnalyserNode` to read frequency data from the selected audio file. The code separates the sound into bass, mid, and treble ranges. These values affect the growth rhythm, the dominant band saved into each building, roof accent marks, and the information shown in the archive panel.
+The audio mechanic is in `js/audio-mechanic.js`. It does not use `p5.sound`. Instead, it uses the browser Web Audio API with `AudioContext` and `AnalyserNode` to read frequency data from the selected audio file. The code separates the sound into bass, mid, and treble ranges. These values affect the growth rhythm, the dominant band saved into each building, roof accent marks, and the information shown in the archive panel.
 
 ### Audio-paced generation
 
@@ -76,13 +76,18 @@ Some sample music files are included in `assets/music/`, but the project also wo
 │   └── music/
 └── js/
     ├── sketch.js
+    ├── city-config.js
+    ├── city-state.js
+    ├── city-grid.js
+    ├── city-generation.js
+    ├── city-renderer.js
     ├── audio-mechanic.js
     ├── time-mechanic.js
     ├── random-mechanic.js
     └── input-mechanic.js
 ```
 
-`sketch.js` manages the shared city state and rendering. Each mechanic is kept in its own JavaScript file, following the modular structure required by the brief.
+`sketch.js` is kept as the main organiser: it creates the canvas, sets up the mechanics, updates them each frame, and calls the render functions. The `city-*` files hold the shared city configuration, state, grid maths, generation rules, and drawing helpers. Each mechanic is kept in its own JavaScript file, following the modular structure required by the brief.
 
 ## AI Acknowledgement
 
@@ -91,9 +96,9 @@ ChatGPT/Codex was used to help with planning, debugging, README drafting, and pa
 ## External References
 
 - [p5.js](https://p5js.org/) was used for canvas drawing, animation, colour, interaction, noise, and random values.
-- [MDN Web Docs: AnalyserNode](https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode) was used as a reference for browser-based frequency analysis.
+- [MDN Web Docs: Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API) and [AnalyserNode](https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode) were used as references for browser-based audio analysis.
 - `assets/reference-isometric-city.jpg` is our visual style reference for the clean isometric city look.
 
 ## Notes
 
-The project loads p5.js from a CDN, so an internet connection is needed unless the library is downloaded locally. Audio files are selected from the user's computer and are not uploaded anywhere.
+The project loads p5.js from a CDN for drawing and animation only, so an internet connection is needed unless the library is downloaded locally. Audio analysis uses the browser's built-in Web Audio API. Audio files are selected from the user's computer and are not uploaded anywhere.
